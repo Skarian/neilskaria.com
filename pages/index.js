@@ -4,10 +4,10 @@ import BlogPostCard from '../components/blogPostCard';
 import ResourceCard from '../components/resourceCard';
 import Link from 'next/link';
 import { getLinkPreview } from 'link-preview-js';
-import { NotionAPI } from 'notion-client';
 import { NextSeo } from 'next-seo';
 import moment from 'moment';
 import { m as motion } from 'framer-motion';
+import { getResources } from '../utils/notion';
 
 const Home = ({ heroData, resources, blogPosts }) => {
   return (
@@ -128,16 +128,7 @@ export async function getStaticProps() {
 
   // Retrieve URLS from Notion table, then call getURLContent
   const getLinks = async () => {
-    const notion = new NotionAPI();
-    let urls = [];
-    const pageId = '6a36d869142340708cd18692d56a512b';
-    const recordMap = await notion.getPage(pageId);
-    const blocks = recordMap.block;
-    Object.keys(blocks).forEach((key) => {
-      if (blocks[key].value && blocks[key].value.type === 'page') {
-        urls.push(blocks[key].value.properties._pmJ[0][0]);
-      }
-    });
+    const urls = await getResources();
     // Fetch URL Preview for first 5 in array
     const urlContent = await getLinkPreviews(urls.slice(0, 3));
     return urlContent;

@@ -1,8 +1,9 @@
 import { m as motion } from 'framer-motion';
 import ResourceCard from '../components/resourceCard';
 import { getLinkPreview } from 'link-preview-js';
-import { NotionAPI } from 'notion-client';
+// import { NotionAPI } from 'notion-client';
 import { NextSeo } from 'next-seo';
+import { getResources } from '../utils/notion';
 
 const Resources = ({ resources }) => {
   console.log(resources);
@@ -60,16 +61,17 @@ export async function getStaticProps() {
 
   // Retrieve URLS from Notion table, then call getURLContent
   const getLinks = async () => {
-    const notion = new NotionAPI();
-    let urls = [];
-    const pageId = '6a36d869142340708cd18692d56a512b';
-    const recordMap = await notion.getPage(pageId);
-    const blocks = recordMap.block;
-    Object.keys(blocks).forEach((key) => {
-      if (blocks[key].value && blocks[key].value.type === 'page') {
-        urls.push(blocks[key].value.properties._pmJ[0][0]);
-      }
-    });
+    // const notion = new NotionAPI();
+    // let urls = [];
+    // const pageId = '6a36d869142340708cd18692d56a512b';
+    // const recordMap = await notion.getPage(pageId);
+    // const blocks = recordMap.block;
+    // Object.keys(blocks).forEach((key) => {
+    //   if (blocks[key].value && blocks[key].value.type === 'page') {
+    //     urls.push(blocks[key].value.properties._pmJ[0][0]);
+    //   }
+    // });
+    const urls = await getResources();
     // Fetch URL Preview for first 5 in array
     const urlContent = await getLinkPreviews(urls);
     return urlContent;
