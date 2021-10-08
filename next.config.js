@@ -11,7 +11,7 @@ module.exports = withBundleAnalyzer({
     };
   },
   images: {
-    domains: ['res.cloudinary.com'],
+    domains: ['res.cloudinary.com', 'www.notion.so'],
   },
   webpack: (config, { dev, isServer }) => {
     // Generate Dynamic Sitemap

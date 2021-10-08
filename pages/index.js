@@ -120,7 +120,11 @@ export async function getStaticProps() {
   const getLinkPreviews = (myArray) => {
     const promises = myArray.map(async (myValue) => {
       try {
-        return await getLinkPreview(myValue);
+        return await getLinkPreview(myValue, {
+          headers: {
+            'user-agent': 'Twitterbot',
+          },
+        });
       } catch (error) {}
     });
     return Promise.all(promises);

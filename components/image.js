@@ -1,7 +1,7 @@
 import NextImage from 'next/image';
 
 const Image = ({ wrapper, src, ...props }) => {
-  if (!src.startsWith('/')) {
+  if (!src.startsWith('/') && !src.startsWith('https://www.notion.so/image/')) {
     return (
       <div className={wrapper}>
         <NextImage
