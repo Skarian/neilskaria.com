@@ -17,14 +17,14 @@ const BlogSeo = ({ title, description, url, alt, image, date }) => {
           url,
           title,
           description: description,
-          images: [
-            {
-              url: image.url,
-              width: image.width,
-              height: image.height,
-              alt: alt,
-            },
-          ],
+          // images: [
+          //   {
+          //     url: image.url,
+          //     width: image.width,
+          //     height: image.height,
+          //     alt: alt,
+          //   },
+          // ],
         }}
       />
       <ArticleJsonLd
