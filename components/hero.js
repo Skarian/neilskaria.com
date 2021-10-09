@@ -12,8 +12,8 @@ const Hero = ({ heroData }) => {
           alt="a picture of neil wearing a suit"
           src="/images/profile.jpg"
           wrapper="max-w-sm"
-          width={747}
-          height={747}
+          width={400}
+          height={400}
           priority
         />
       </div>

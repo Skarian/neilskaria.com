@@ -9,9 +9,10 @@ import matter from 'gray-matter';
 import Share from '../../components/share';
 import ConvertKitForm from '../../components/convertKitForm';
 
-const Blog = ({ blogPost, mdx, frontMatter }) => {
+// const Blog = ({ blogPost, mdx, frontMatter }) => {
+const Blog = ({ blogPost, mdx }) => {
   const content = hydrate(mdx, { components: { Image } });
-  const { category, description, title, date, alt, slug, body } = blogPost;
+  const { category, description, title, date, alt, slug, body, image } = blogPost;
   function calcReadingTime(post) {
     const WORDS_PER_MINUTE = 200;
     let result = {};
@@ -31,7 +32,7 @@ const Blog = ({ blogPost, mdx, frontMatter }) => {
         url={`https://neilskaria.com/blog/${slug}`}
         title={title}
         description={description}
-        image={frontMatter.image}
+        image={image}
         alt={alt}
         date={date}
       />
@@ -62,10 +63,10 @@ const Blog = ({ blogPost, mdx, frontMatter }) => {
 
           <div className="max-w-full flex justify-center">
             <Image
-              src={frontMatter.image}
-              width={frontMatter.width}
-              height={frontMatter.height}
-              alt={frontMatter.alt}
+              src={image.url}
+              width={image.width}
+              height={image.height}
+              alt={alt}
               wrapper="max-w-2xl"
               priority
             />
@@ -105,6 +106,11 @@ export async function getStaticProps({ params }) {
           alt
           body
           slug
+          image {
+            url
+            width
+            height
+          }
         }
       }
     }
@@ -125,7 +131,7 @@ export async function getStaticProps({ params }) {
     props: {
       blogPost: response.postCollection.items[0],
       mdx,
-      frontMatter: data,
+      // frontMatter: data,
     },
     revalidate: 10,
   };
@@ -146,7 +152,6 @@ export async function getStaticPaths() {
   const slugs = newResponse.postCollection.items.map((item) => {
     return item.slug;
   });
-  console.log();
   return {
     paths: slugs.map((post) => ({
       params: {

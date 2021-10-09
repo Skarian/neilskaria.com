@@ -5,7 +5,6 @@ const description =
 const SEO = {
   title,
   description,
-  lang: 'en',
   canonical: 'https://neilskaria.com',
   openGraph: {
     type: 'website',

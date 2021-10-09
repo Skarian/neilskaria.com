@@ -33,7 +33,7 @@ const ResourceCard = ({ title, description, link, image, priority }) => {
 
             <p className="mt-2 text-gray-900 truncate mb-5">{description}</p>
 
-            <div className="uppercase tracking-wide text-xs text-green-500 font-semibold">
+            <div className="uppercase tracking-wide text-xs text-green-600 font-semibold">
               <span className="pr-1">🔗</span> {getHostName(link)}
             </div>
           </div>

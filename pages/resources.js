@@ -6,7 +6,6 @@ import { NextSeo } from 'next-seo';
 import { getResources } from '../utils/notion';
 
 const Resources = ({ resources }) => {
-  console.log(resources);
   return (
     <>
       <NextSeo

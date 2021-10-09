@@ -31,7 +31,7 @@ const Home = ({ heroData, resources, blogPosts }) => {
               A collection of my thoughts on a variety of topics
             </p>
           </div>
-          {blogPosts.map(({ title, category, description, date, alt, body, slug }) => {
+          {blogPosts.map(({ title, category, description, date, alt, body, slug, image }) => {
             return (
               <BlogPostCard
                 key={title}
@@ -42,6 +42,7 @@ const Home = ({ heroData, resources, blogPosts }) => {
                 date={date}
                 body={body}
                 slug={slug}
+                image={image.url}
                 priority={true}
               />
             );
@@ -107,6 +108,9 @@ export async function getStaticProps() {
           alt
           body
           slug
+          image {
+            url
+          }
         }
       }
     }
