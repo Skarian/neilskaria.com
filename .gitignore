@@ -34,3 +34,6 @@ yarn-error.log*
 .vercel
 
 /pages/playground.js
+
+# Local agent coordination record in the main checkout
+/.agents/coordination.md
