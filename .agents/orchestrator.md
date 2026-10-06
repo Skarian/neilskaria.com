@@ -60,7 +60,7 @@ Workers make focused commits on their own branches. Nobody rewrites history, for
 
 The orchestrator keeps a short task record in one file: `.agents/coordination.md` in the project's **main checkout** (the original clone, not a linked worktree). The link [coordination.md](coordination.md) only reaches that record when this guide is read from the main checkout. Each worktree has its own copy of the files, so nobody creates or maintains a separate record inside a worktree. The record is local operational state, excluded from Git; it is never committed or merged between branches.
 
-For each active task the record lists where to find the worker or task, the scope, the worker's actual worktree path and branch, the status, the evidence so far, and the next step. It also notes the monitoring schedule described below, if one exists. Actual branch and checkout names belong in the record, not in this guide.
+For each active task the record lists where to find the worker or task, the scope, the worker's actual worktree path and branch, the status, the evidence so far, and the next step. It also notes the dedicated-thread monitoring schedule described below, if one exists, and whether it is on. Actual branch and checkout names belong in the record, not in this guide.
 
 The orchestrator decides what the record should say, and a record worker it assigns makes the edit, using the record's full path in the main checkout. Feature workers get everything they need in their brief and don't edit the record.
 
@@ -68,13 +68,17 @@ The orchestrator may itself be running in a linked worktree, so it doesn't assum
 
 ### 5. Follow the work
 
-Once workers are actually underway, the orchestrator sets up monitoring as a matter of routine, without waiting for the user to ask or approve it. It uses one recurring T3 schedule, bound to its own thread, that checks in every 15 minutes. If a schedule already exists, the orchestrator turns it back on and reuses it rather than creating another; there is never one timer per worker. The schedule's ID and the workers and tasks it tracks go in the task record.
+How the orchestrator follows a worker depends on its form.
 
-At each check, the orchestrator reads what's new in each tracked worker's conversation: the actual tool results, completion evidence, errors or blockers, and any decisions the user made there. It reviews that in proportion to the task, as described in the next step, and tells the user about meaningful changes or problems. It doesn't send a message just to say nothing has changed.
+**Subagents** don't need scheduled polling. T3 notifies the orchestrator when a subagent finishes, and the orchestrator checks the task or its thread directly whenever it needs to, including explicit checks on any follow-up run it sends. A subagent never causes the schedule below to start or stay on.
 
-When every tracked worker's assignment is complete and its results have been checked, or the work has been explicitly cancelled, the orchestrator turns the schedule off. A worker that has gone idle or stopped hasn't necessarily finished its assignment, so that alone doesn't count. When new worker work starts, monitoring is turned back on.
+**Dedicated threads** are monitored with one recurring T3 schedule, bound to the orchestrator's own thread, that checks in every 15 minutes. Once dedicated-thread work is actually underway, the orchestrator turns the schedule on as a matter of routine, without waiting for the user to ask or approve it. If a schedule already exists, it reuses it rather than creating another; there is never one timer per thread. The schedule's ID and the dedicated threads it tracks go in the task record.
 
-This monitoring is the orchestrator using T3's scheduler. It isn't a shell loop or a long-running worker, and it covers only the workers assigned to the current work, not every past thread. Subagents also trigger T3's own completion notice when they finish, which is useful but doesn't replace these checks.
+At each check, the orchestrator reads what's new in each tracked thread: the actual tool results, completion evidence, errors or blockers, and any decisions the user made there. It reviews that in proportion to the task, as described in the next step, and tells the user about meaningful changes or problems. It doesn't send a message just to say nothing has changed.
+
+When every tracked dedicated thread's assignment is complete and its results have been checked, or the work has been explicitly cancelled, the orchestrator turns the schedule off. A thread that has gone idle or stopped hasn't necessarily finished its assignment, so that alone doesn't count. When new dedicated-thread work starts, the schedule is turned back on.
+
+This monitoring is the orchestrator using T3's scheduler. It isn't a shell loop or a long-running worker, and it covers only the dedicated threads assigned to the current work, not every past thread.
 
 ### 6. Check the result
 
@@ -90,7 +94,7 @@ Before pushing, it checks what the push will deploy. If the push would change th
 
 ### 8. Close out
 
-The combining worker records the final revision and the check results in its thread. The orchestrator reviews that evidence, has the task record updated, turns off the monitoring schedule if no other work is still running, and tells the user what landed and what's still left.
+The combining worker records the final revision and the check results in its thread. The orchestrator reviews that evidence, has the task record updated, turns off the monitoring schedule if no other dedicated-thread work is still running, and tells the user what landed and what's still left.
 
 ## Taking over as orchestrator
 
