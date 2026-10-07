@@ -6,7 +6,7 @@ This guide explains how work on this repository is shared among several AI agent
 
 **The user** owns the project and makes the decisions. They usually start by talking to the orchestrator, but they can also open any worker's thread and work there directly.
 
-**The orchestrator** is the agent that oversees the whole effort. It plans the work, hands it out, keeps track of the tasks it assigns, checks results, raises problems with the user, and coordinates when one agent's change affects another's. It does not do the hands-on work itself.
+**The orchestrator** is the agent that oversees the whole effort. It plans the work, hands it out, keeps track of the tasks it assigns, checks results, raises problems with the user, and coordinates when one agent's change affects another's. It looks things up directly but does not do the hands-on work itself.
 
 **Workers** are the agents that do the hands-on work: editing files, running commands, testing, and using Git. A worker runs in one of two forms, and both are normal ways to get work done:
 
@@ -17,11 +17,11 @@ Workers are not asked to message or call the orchestrator back. Each worker leav
 
 ## What the orchestrator does and doesn't do
 
-The orchestrator researches, reads files, plans, writes briefs, delegates, inspects evidence, and communicates. It never executes anything: no shell commands (not even read-only ones), no edits to the repository, no Git, no builds or tests, and no deployments. Anything that needs executing goes to a worker.
+The orchestrator researches, plans, writes briefs, delegates, inspects evidence, and communicates. It also does routine, bounded read-only inspection itself, with file tools or the shell: listing directories, reading and searching files, and checking Git status, diffs, logs, and the worktree list. These quick checks don't need a worker or a new thread. What counts is a command's actual effect and risk, not whether it runs in a shell: the orchestrator doesn't expose secrets, doesn't run project scripts, and doesn't treat a nominally read-only command with real side effects as safe (for Git, it suppresses optional writes such as index refreshes with `--no-optional-locks` where supported). Everything else goes to a worker: implementation, edits to the repository, builds, tests, and installs, Git changes such as commits, pushes, and merges, deployments, and system changes.
 
-The orchestrator's thread runs with Full access because the T3 orchestration tools need it. That access is for coordinating, not for doing work.
+The orchestrator's thread runs with Full access because the T3 orchestration tools need it. That access is for coordinating and safe inspection, not for doing work.
 
-Subagents run in **Auto-review** mode by default. If a tool has been shown to fail under Auto-review, as with the Git problem the user reported, the orchestrator may use the narrowly scoped Full access helper the user has already authorized, only for the troublesome commands, in the same existing checkout and branch, with competing edits paused. The orchestrator can't change or automatically restore an existing thread's access; the user manages access for their dedicated threads in the app.
+Subagents run in **Auto-review** mode by default. When a command a worker is authorized to run fails because of sandbox permissions or credential access, the worker first requests ordinary per-command approval through Auto-review, where its tools and policy allow, rather than asking for the whole thread's access to change. For example, a read-only `gh api user` call that failed authentication in the sandbox succeeded once approved to run outside it. Approval is requested, not guaranteed: if the reviewer refuses, the worker reports the refusal in its conversation and never routes around it. Only for a genuine tooling block, where that approval route is unavailable or fails technically and no refusal is being evaded, may the orchestrator use the narrowly scoped Full access helper the user has already authorized, only for the troublesome commands, in the same existing checkout and branch, with competing edits paused. The orchestrator can't change or automatically restore an existing thread's access; the user manages access for their dedicated threads in the app. Workers don't read this guide, so every brief, for a subagent or a dedicated thread, states this approval workflow.
 
 ## Choosing models
 
@@ -38,7 +38,7 @@ These are the user's preferences, confirmed in the live catalog on 2026-10-06. C
 
 ### 1. Plan and assign
 
-The orchestrator breaks the user's request into tasks and gives each one to a worker, either as a subagent or in a separate thread. If the user has already said which they want, the orchestrator follows that. If it's unclear, it asks a short question, such as "Would you like separate threads or subagents?", before creating either. There is no fixed limit on how many run at once; it depends on how many tasks are truly independent.
+The orchestrator breaks the user's request into tasks and gives each one to a worker, either as a subagent or in a separate thread. Questions it can answer with a quick read-only check, it answers itself rather than assigning them. If the user has already said which they want, the orchestrator follows that. If it's unclear, it asks a short question, such as "Would you like separate threads or subagents?", before creating either. There is no fixed limit on how many run at once; it depends on how many tasks are truly independent.
 
 Before naming a new thread, the orchestrator lists the project's open threads and picks a descriptive name that can't be confused with the others.
 
@@ -46,7 +46,7 @@ Before naming a new thread, the orchestrator lists the project's open threads an
 
 A worker hasn't necessarily seen the conversation, so its brief has to stand on its own. For example:
 
-> In the checkout at `<worktree path>`, on branch `task/contact-form-validation`, make the contact form show an inline error for an empty email instead of submitting. You own `app/contact/form.tsx` and its test file; leave everything else alone. Done means the error appears, valid input still submits, and lint and the form tests pass; include the check output in your result. You may make one focused commit on this branch. Don't push or deploy.
+> In the checkout at `<worktree path>`, on branch `task/contact-form-validation`, make the contact form show an inline error for an empty email instead of submitting. You own `app/contact/form.tsx` and its test file; leave everything else alone. Done means the error appears, valid input still submits, and lint and the form tests pass; include the check output in your result. You may make one focused commit on this branch. Don't push or deploy. If a command you're authorized to run fails on sandbox permissions or credentials, request per-command approval through Auto-review; if the reviewer refuses, stop and report it rather than working around it.
 
 ### 3. Set up the workspace
 
@@ -66,7 +66,7 @@ For each active task the record lists where to find the worker or task, the scop
 
 The orchestrator decides what the record should say, and a record worker it assigns makes the edit, using the record's full path in the main checkout. Feature workers get everything they need in their brief and don't edit the record.
 
-The orchestrator may itself be running in a linked worktree, so it doesn't assume its current checkout is the main one. It finds the main checkout from T3's project or workspace metadata, or from a Git worktree list run by a worker.
+The orchestrator may itself be running in a linked worktree, so it doesn't assume its current checkout is the main one. It finds the main checkout from T3's project or workspace metadata, or from a Git worktree list it runs itself.
 
 ### 5. Follow the work
 
@@ -76,7 +76,7 @@ Dedicated threads are led by the user. The orchestrator looks at one when the us
 
 ### 6. Check the result
 
-A worker's summary of its own work isn't proof that the work is right. Since the orchestrator can't run commands, the worker leaves evidence in its conversation that the orchestrator can read: links to the changed files or diff, or the exact revision, plus the output of the checks it ran. The orchestrator then looks at what actually happened in the thread (messages, tool results, changes, and checks), including any errors, fallbacks, or workarounds, even if the task ended well.
+A worker's summary of its own work isn't proof that the work is right. The worker leaves evidence in its conversation that the orchestrator can read: links to the changed files or diff, or the exact revision, plus the output of the checks it ran. The orchestrator then looks at what actually happened in the thread (messages, tool results, changes, and checks), including any errors, fallbacks, or workarounds, even if the task ended well.
 
 How closely to look depends on the size and risk of the task. A small documentation change doesn't need an extra reviewer or repeated review rounds. If something is wrong or unverified, the orchestrator either sends follow-up work or tells the user plainly what's still uncertain. Once the orchestrator is satisfied, the work is **accepted**.
 
@@ -92,4 +92,4 @@ The combining worker records the final revision and the check results in its thr
 
 ## Taking over as orchestrator
 
-A new orchestrator first finds the main checkout as described in step 4 and starts with the task record there, then checks it against what's really there: the state of each assigned task, any dedicated threads involved in the current work and decisions the user made in them, and the repository and worktrees, which a worker inspects on its behalf.
+A new orchestrator first finds the main checkout as described in step 4 and starts with the task record there, then checks it against what's really there: the state of each assigned task, any dedicated threads involved in the current work and decisions the user made in them, and the repository and worktrees, which it can inspect directly.
