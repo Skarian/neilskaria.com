@@ -1,0 +1,28 @@
+# Package Managers
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+bun.lock
+bun.lockb
+
+# Miscellaneous
+/static/
+
+# Retained personal assets, local content, and repository policy
+/public/
+/assets/
+/blog/
+/markdown/
+/research/
+/pages/
+/components/
+/docs/
+/scripts/
+/styles/
+/utils/
+/.agents/
+/AGENTS.md
+/.next/
+/.svelte-kit/
+/.vercel/
+/node_modules/

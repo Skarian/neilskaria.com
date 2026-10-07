@@ -37,3 +37,19 @@ yarn-error.log*
 
 # Local agent coordination record in the main checkout
 /.agents/coordination.md
+
+# SvelteKit and adapter output
+/.svelte-kit/
+/.output/
+/.netlify/
+/.wrangler/
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Windows
+Thumbs.db
