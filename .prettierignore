@@ -11,15 +11,6 @@ bun.lockb
 # Retained personal assets, local content, and repository policy
 /public/
 /assets/
-/blog/
-/markdown/
-/research/
-/pages/
-/components/
-/docs/
-/scripts/
-/styles/
-/utils/
 /.agents/
 /AGENTS.md
 /.next/

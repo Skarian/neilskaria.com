@@ -23,8 +23,13 @@ npm run preview
 
 `npm run format` formats the starter files; retained policy, assets, and old local
 content are excluded. Markdown and Svelte embeds can use `.md` or `.svx`; the
-minimal homepage demonstrates mdsvex and is prerendered. Existing assets are
-served from `public/`.
+minimal homepage demonstrates mdsvex and is prerendered.
+
+`src/` contains the app. `public/` contains files served directly by the site,
+currently just the favicon. `assets/legacy/` preserves the old images and resume
+in Git, outside the served directory. Its ignored `local/` folder preserves old
+banner/blog assets, Markdown, playground code, and research files only in this
+checkout. These archived files are not used by the starter or web served.
 
 For later 3D scenes, import `Canvas` and `T` from `@threlte/core`, and helpers from
 `@threlte/extras`. Give each canvas container an explicit size. No scene assets or
