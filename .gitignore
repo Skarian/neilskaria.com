@@ -39,6 +39,9 @@ yarn-error.log*
 # Local agent coordination record in the main checkout
 /.agents/coordination.md
 
+# Downloaded project-local agent skills (source recorded in skills-lock.json)
+/.agents/skills/
+
 # SvelteKit and adapter output
 /.svelte-kit/
 /.output/

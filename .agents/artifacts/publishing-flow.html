@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Publishing flow for neilskaria.com</title>
+<style>
+  :root { --ink:#1c1c1c; --mute:#5a5a5a; --blue:#2a64a8; --rust:#b0521d; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:#fff; color:var(--ink);
+         font-family:"Helvetica Neue", Helvetica, Arial, sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:28px 16px 40px; }
+  h1 { font-size:22px; font-weight:700; margin:0 0 4px; letter-spacing:-0.01em; }
+  .sub { margin:0 0 22px; font-size:13px; color:var(--mute); }
+  figure { margin:0 0 28px; }
+  figcaption { font-size:13px; line-height:1.5; color:var(--ink); margin-top:8px;
+               border-top:1px solid #d8d8d8; padding-top:8px; }
+  figcaption b { font-weight:700; }
+  svg { display:block; width:100%; height:auto; }
+  .phone { display:none; }
+  @media (max-width:560px) {
+    .desk { display:none; }
+    .phone { display:block; }
+    h1 { font-size:20px; }
+  }
+  svg text { font-family:"Helvetica Neue", Helvetica, Arial, sans-serif; }
+  .t  { font-size:13px; font-weight:700; fill:var(--ink); text-anchor:middle; }
+  .s  { font-size:11px; fill:var(--mute); text-anchor:middle; }
+  .n  { font-size:11px; font-weight:700; fill:#fff; text-anchor:middle; }
+  .lab{ font-size:11px; font-style:italic; fill:var(--mute); }
+  .hb { font-size:11px; font-weight:700; letter-spacing:0.08em; }
+  .hr { font-size:11px; fill:var(--mute); }
+  .box{ fill:#fff; stroke:var(--ink); stroke-width:1.25; }
+  .dash{ fill:#fff; stroke:var(--ink); stroke-width:1; stroke-dasharray:4 3; }
+  .halo-b { paint-order:stroke; stroke:#edf3f9; stroke-width:5; stroke-linejoin:round; }
+  .wk { font-size:11px; fill:var(--mute); text-anchor:middle; }
+  .rl { font-size:12px; font-weight:700; fill:var(--ink); }
+  .sl { font-size:11px; fill:var(--mute); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Publishing flow for neilskaria.com</h1>
+  <p class="sub">Proposed flow and starting rhythm</p>
+
+  <!-- ============ FIGURE 1: STEPS ============ -->
+  <figure>
+    <!-- Desktop -->
+    <svg class="desk" viewBox="0 0 728 461" role="img" aria-labelledby="f1d">
+      <title id="f1d">Steps: write one or two blog posts a week, publish on the site, share each on X. Standalone X posts need no blog post or link; X totals 3 to 5 posts a week. Roughly weekly, collect the week's blog posts, copy into Substack, send to the email list. Website sign-ups join the same list.</title>
+      <defs>
+        <marker id="a-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1c1c1c"/></marker>
+        <marker id="a-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2a64a8"/></marker>
+        <marker id="a-rust" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b0521d"/></marker>
+      </defs>
+
+      <!-- Band 1: as ready -->
+      <rect x="4" y="4" width="720" height="242" rx="6" fill="#edf3f9" stroke="#b7cce3"/>
+      <text x="18" y="26"><tspan class="hb" fill="#2a64a8">AS READY</tspan><tspan class="hr"> — blog: 1–2 posts a week, one is enough</tspan></text>
+
+      <!-- return arc: readers -> site -->
+      <path d="M637 72 C637 38, 273 38, 273 70" fill="none" stroke="#2a64a8" stroke-width="1.5" marker-end="url(#a-blue)"/>
+      <text class="lab halo-b" x="455" y="50" text-anchor="middle">readers follow the link to the full post</text>
+
+      <!-- row 1: blog post -->
+      <rect class="box" x="16" y="72" width="150" height="58" rx="3"/>
+      <text class="t" x="91" y="93">Write a blog post</text>
+      <text class="s" x="91" y="110">one a week is enough,</text>
+      <text class="s" x="91" y="123">a second if time allows</text>
+      <circle cx="16" cy="72" r="10" fill="#1c1c1c"/><text class="n" x="16" y="76">1</text>
+
+      <rect class="box" x="198" y="72" width="150" height="58" rx="3"/>
+      <text class="t" x="273" y="93">Publish the post</text>
+      <text class="s" x="273" y="110">full original on</text>
+      <text class="s" x="273" y="123">neilskaria.com</text>
+      <circle cx="198" cy="72" r="10" fill="#1c1c1c"/><text class="n" x="198" y="76">2</text>
+
+      <rect class="box" x="380" y="72" width="150" height="58" rx="3"/>
+      <text class="t" x="455" y="93">Share on X</text>
+      <text class="s" x="455" y="110">key takeaway +</text>
+      <text class="s" x="455" y="123">link to the post</text>
+      <circle cx="380" cy="72" r="10" fill="#1c1c1c"/><text class="n" x="380" y="76">3</text>
+
+      <rect class="dash" x="562" y="72" width="150" height="58" rx="3"/>
+      <text class="t" x="637" y="105">Readers on X</text>
+
+      <line x1="166" y1="101" x2="196" y2="101" stroke="#2a64a8" stroke-width="1.5" marker-end="url(#a-blue)"/>
+      <line x1="348" y1="101" x2="378" y2="101" stroke="#2a64a8" stroke-width="1.5" marker-end="url(#a-blue)"/>
+      <line x1="530" y1="101" x2="560" y2="101" stroke="#2a64a8" stroke-width="1.5" marker-end="url(#a-blue)"/>
+
+      <!-- row 2: standalone X post + X tally -->
+      <rect class="box" x="380" y="160" width="150" height="72" rx="3"/>
+      <text class="t" x="455" y="181">Standalone X post</text>
+      <text class="s" x="455" y="198">observation, question</text>
+      <text class="s" x="455" y="211">or short demo —</text>
+      <text class="s" x="455" y="224">no blog post or link</text>
+      <path d="M530 196 H637 V132" fill="none" stroke="#2a64a8" stroke-width="1.5" marker-end="url(#a-blue)"/>
+
+      <text class="rl" x="16" y="180">X: 3–5 posts a week in total</text>
+      <text class="sl" x="16" y="197">1–2 blog shares (step 3)</text>
+      <text class="sl" x="16" y="211">remaining posts: standalone</text>
+      <text class="lab" x="16" y="225">replies optional, not counted</text>
+
+      <!-- Band 2: roughly weekly -->
+      <rect x="4" y="256" width="720" height="120" rx="6" fill="#faf1e9" stroke="#e2c4ab"/>
+      <text x="18" y="278"><tspan class="hb" fill="#b0521d">ROUGHLY WEEKLY</tspan><tspan class="hr"> — one batch</tspan></text>
+
+      <!-- site -> collect -->
+      <line x1="273" y1="130" x2="273" y2="299" stroke="#b0521d" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#a-rust)"/>
+      <text class="lab" x="283" y="272">posts wait until the next email</text>
+
+      <rect class="box" x="198" y="301" width="150" height="58" rx="3"/>
+      <text class="t" x="273" y="322">Collect blog posts</text>
+      <text class="s" x="273" y="339">the week's 1–2, since</text>
+      <text class="s" x="273" y="352">the last newsletter</text>
+      <circle cx="198" cy="301" r="10" fill="#1c1c1c"/><text class="n" x="198" y="305">4</text>
+
+      <rect class="box" x="380" y="301" width="150" height="58" rx="3"/>
+      <text class="t" x="455" y="322">Copy into Substack</text>
+      <text class="s" x="455" y="339">light edit,</text>
+      <text class="s" x="455" y="352">short intro</text>
+      <circle cx="380" cy="301" r="10" fill="#1c1c1c"/><text class="n" x="380" y="305">5</text>
+
+      <rect class="box" x="562" y="301" width="150" height="58" rx="3"/>
+      <text class="t" x="637" y="322">Send newsletter</text>
+      <text class="s" x="637" y="339">to everyone on</text>
+      <text class="s" x="637" y="352">the email list</text>
+      <circle cx="562" cy="301" r="10" fill="#1c1c1c"/><text class="n" x="562" y="305">6</text>
+
+      <line x1="348" y1="330" x2="378" y2="330" stroke="#b0521d" stroke-width="1.5" marker-end="url(#a-rust)"/>
+      <line x1="530" y1="330" x2="560" y2="330" stroke="#b0521d" stroke-width="1.5" marker-end="url(#a-rust)"/>
+
+      <!-- Row 3: list -->
+      <line x1="637" y1="359" x2="637" y2="399" stroke="#1c1c1c" stroke-width="1.25" marker-end="url(#a-ink)"/>
+
+      <rect class="box" x="562" y="401" width="150" height="50" rx="3"/>
+      <text class="t" x="637" y="422">Email list</text>
+      <text class="s" x="637" y="438">newsletter subscribers</text>
+
+      <rect class="box" x="198" y="401" width="150" height="50" rx="3"/>
+      <text class="t" x="273" y="422">Subscribe link</text>
+      <text class="s" x="273" y="438">on neilskaria.com</text>
+
+      <line x1="348" y1="426" x2="560" y2="426" stroke="#1c1c1c" stroke-width="1.25" marker-end="url(#a-ink)"/>
+      <text class="lab" x="455" y="418" text-anchor="middle">sign-ups join the same list</text>
+    </svg>
+
+    <!-- Phone -->
+    <svg class="phone" viewBox="0 0 360 892" role="img" aria-labelledby="f1p">
+      <title id="f1p">Steps: write one or two blog posts a week, publish on the site, share each on X. Standalone X posts need no blog post or link; X totals 3 to 5 posts a week. Roughly weekly, collect the week's blog posts, copy into Substack, send to the email list. Website sign-ups join the same list.</title>
+      <defs>
+        <marker id="p-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1c1c1c"/></marker>
+        <marker id="p-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2a64a8"/></marker>
+        <marker id="p-rust" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b0521d"/></marker>
+      </defs>
+
+      <rect x="2" y="2" width="356" height="450" rx="6" fill="#edf3f9" stroke="#b7cce3"/>
+      <text x="32" y="23"><tspan class="hb" fill="#2a64a8">AS READY</tspan><tspan class="hr"> — blog: 1–2 posts a week</tspan></text>
+
+      <rect class="box" x="40" y="36" width="240" height="50" rx="3"/>
+      <text class="t" x="160" y="57">Write a blog post</text>
+      <text class="s" x="160" y="74">one a week is enough, two if time allows</text>
+      <circle cx="40" cy="36" r="10" fill="#1c1c1c"/><text class="n" x="40" y="40">1</text>
+
+      <rect class="box" x="40" y="106" width="240" height="50" rx="3"/>
+      <text class="t" x="160" y="127">Publish the post</text>
+      <text class="s" x="160" y="144">full original on neilskaria.com</text>
+      <circle cx="40" cy="106" r="10" fill="#1c1c1c"/><text class="n" x="40" y="110">2</text>
+
+      <rect class="box" x="40" y="176" width="240" height="50" rx="3"/>
+      <text class="t" x="160" y="197">Share on X</text>
+      <text class="s" x="160" y="214">key takeaway + link to the post</text>
+      <circle cx="40" cy="176" r="10" fill="#1c1c1c"/><text class="n" x="40" y="180">3</text>
+
+      <rect class="dash" x="40" y="246" width="240" height="40" rx="3"/>
+      <text class="t" x="160" y="271">Readers on X</text>
+
+      <line x1="160" y1="86" x2="160" y2="104" stroke="#2a64a8" stroke-width="1.5" marker-end="url(#p-blue)"/>
+      <line x1="160" y1="156" x2="160" y2="174" stroke="#2a64a8" stroke-width="1.5" marker-end="url(#p-blue)"/>
+      <line x1="160" y1="226" x2="160" y2="244" stroke="#2a64a8" stroke-width="1.5" marker-end="url(#p-blue)"/>
+
+      <path d="M280 266 H306 V131 H282" fill="none" stroke="#2a64a8" stroke-width="1.5" marker-end="url(#p-blue)"/>
+      <text class="lab" x="0" y="0" text-anchor="middle" transform="translate(326 198) rotate(-90)">readers follow link to the post</text>
+
+      <!-- standalone X post + X tally -->
+      <rect class="box" x="40" y="306" width="240" height="62" rx="3"/>
+      <text class="t" x="160" y="326">Standalone X post</text>
+      <text class="s" x="160" y="343">observation, question or short demo</text>
+      <text class="s" x="160" y="357">no blog post or link needed</text>
+      <line x1="160" y1="306" x2="160" y2="288" stroke="#2a64a8" stroke-width="1.5" marker-end="url(#p-blue)"/>
+
+      <text class="rl" x="40" y="392">X: 3–5 posts a week in total</text>
+      <text class="sl" x="40" y="408">1–2 blog shares (step 3)</text>
+      <text class="sl" x="40" y="423">remaining posts: standalone</text>
+      <text class="lab" x="40" y="438">replies optional, not counted</text>
+
+      <rect x="2" y="466" width="356" height="242" rx="6" fill="#faf1e9" stroke="#e2c4ab"/>
+      <text x="32" y="488"><tspan class="hb" fill="#b0521d">ROUGHLY WEEKLY</tspan><tspan class="hr"> — one batch</tspan></text>
+
+      <path d="M40 131 H18 V529 H38" fill="none" stroke="#b0521d" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#p-rust)"/>
+
+      <rect class="box" x="40" y="504" width="240" height="50" rx="3"/>
+      <text class="t" x="160" y="525">Collect blog posts</text>
+      <text class="s" x="160" y="542">the week's 1–2, since the last newsletter</text>
+      <circle cx="40" cy="504" r="10" fill="#1c1c1c"/><text class="n" x="40" y="508">4</text>
+
+      <rect class="box" x="40" y="574" width="240" height="50" rx="3"/>
+      <text class="t" x="160" y="595">Copy into Substack</text>
+      <text class="s" x="160" y="612">light edit, short intro</text>
+      <circle cx="40" cy="574" r="10" fill="#1c1c1c"/><text class="n" x="40" y="578">5</text>
+
+      <rect class="box" x="40" y="644" width="240" height="50" rx="3"/>
+      <text class="t" x="160" y="665">Send newsletter</text>
+      <text class="s" x="160" y="682">to everyone on the email list</text>
+      <circle cx="40" cy="644" r="10" fill="#1c1c1c"/><text class="n" x="40" y="648">6</text>
+
+      <line x1="160" y1="554" x2="160" y2="572" stroke="#b0521d" stroke-width="1.5" marker-end="url(#p-rust)"/>
+      <line x1="160" y1="624" x2="160" y2="642" stroke="#b0521d" stroke-width="1.5" marker-end="url(#p-rust)"/>
+
+      <line x1="160" y1="694" x2="160" y2="732" stroke="#1c1c1c" stroke-width="1.25" marker-end="url(#p-ink)"/>
+
+      <rect class="box" x="40" y="734" width="240" height="50" rx="3"/>
+      <text class="t" x="160" y="755">Email list</text>
+      <text class="s" x="160" y="772">newsletter subscribers</text>
+
+      <rect class="box" x="40" y="832" width="240" height="50" rx="3"/>
+      <text class="t" x="160" y="853">Subscribe link</text>
+      <text class="s" x="160" y="870">on neilskaria.com</text>
+
+      <line x1="160" y1="832" x2="160" y2="786" stroke="#1c1c1c" stroke-width="1.25" marker-end="url(#p-ink)"/>
+      <text class="lab" x="170" y="813">sign-ups join the same list</text>
+    </svg>
+
+    <figcaption><b>Figure 1.</b> Steps 1–3 happen for each blog post as soon as it is finished: 1–2 a week, and one is enough. X carries 3–5 posts a week in total: one share per blog post, the rest standalone posts that need no article or link. Steps 4–6 happen roughly once a week and cover the blog posts not yet emailed.</figcaption>
+  </figure>
+
+  <!-- ============ FIGURE 2: TIMING ============ -->
+  <figure>
+    <!-- Desktop -->
+    <svg class="desk" viewBox="0 0 728 236" role="img" aria-labelledby="f2d">
+      <title id="f2d">Example timeline over three weeks: one or two blog posts a week, each shared on X; standalone X posts bring the weekly X totals to 4, 5 and 3; a newsletter near the end of each week carries that week's blog posts.</title>
+      <defs>
+        <marker id="t-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8a8a8a"/></marker>
+        <marker id="t-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1c1c1c"/></marker>
+      </defs>
+
+      <text class="rl" x="16" y="50">Posts on X</text>
+      <circle cx="20" cy="63" r="4" fill="#1c1c1c"/>
+      <text class="sl" x="29" y="67">blog share</text>
+      <circle cx="20" cy="79" r="4" fill="#fff" stroke="#1c1c1c" stroke-width="1.25"/>
+      <text class="sl" x="29" y="83">standalone</text>
+      <text class="rl" x="16" y="116">Blog post</text>
+      <text class="sl" x="16" y="131">on neilskaria.com</text>
+      <text class="rl" x="16" y="180">Newsletter</text>
+
+      <g stroke="#bdbdbd" stroke-dasharray="3 3">
+        <line x1="140" y1="32" x2="140" y2="205"/><line x1="329" y1="32" x2="329" y2="205"/>
+        <line x1="518" y1="32" x2="518" y2="205"/><line x1="707" y1="32" x2="707" y2="205"/>
+      </g>
+      <line x1="140" y1="205" x2="718" y2="205" stroke="#1c1c1c" stroke-width="1.25" marker-end="url(#t-ink)"/>
+      <text class="wk" x="234" y="223">Week 1</text>
+      <text class="wk" x="423" y="223">Week 2</text>
+      <text class="wk" x="612" y="223">Week 3</text>
+      <text class="wk" x="234" y="22">4 X posts</text>
+      <text class="wk" x="423" y="22">5 X posts</text>
+      <text class="wk" x="612" y="22">3 X posts</text>
+
+      <!-- blog -> X share; blog -> newsletter -->
+      <g stroke="#8a8a8a" stroke-width="1" marker-end="url(#t-gray)">
+        <line x1="200" y1="104" x2="200" y2="54"/>
+        <line x1="365" y1="104" x2="365" y2="54"/>
+        <line x1="430" y1="104" x2="430" y2="54"/>
+        <line x1="600" y1="104" x2="600" y2="54"/>
+        <line x1="204" y1="118" x2="305" y2="165"/>
+        <line x1="368" y1="119" x2="490" y2="165"/>
+        <line x1="433" y1="119" x2="493" y2="165"/>
+        <line x1="604" y1="118" x2="685" y2="165"/>
+      </g>
+
+      <!-- X: blog shares -->
+      <g fill="#1c1c1c">
+        <circle cx="200" cy="46" r="5"/><circle cx="365" cy="46" r="5"/>
+        <circle cx="430" cy="46" r="5"/><circle cx="600" cy="46" r="5"/>
+      </g>
+      <!-- X: standalone -->
+      <g fill="#fff" stroke="#1c1c1c" stroke-width="1.25">
+        <circle cx="165" cy="46" r="5"/><circle cx="250" cy="46" r="5"/><circle cx="290" cy="46" r="5"/>
+        <circle cx="397" cy="46" r="5"/><circle cx="465" cy="46" r="5"/><circle cx="498" cy="46" r="5"/>
+        <circle cx="550" cy="46" r="5"/><circle cx="660" cy="46" r="5"/>
+      </g>
+
+      <!-- blog posts -->
+      <g fill="#2a64a8">
+        <circle cx="200" cy="112" r="7"/><circle cx="365" cy="112" r="7"/>
+        <circle cx="430" cy="112" r="7"/><circle cx="600" cy="112" r="7"/>
+      </g>
+
+      <g fill="#fff" stroke="#b0521d" stroke-width="1.5">
+        <rect x="301" y="168" width="22" height="16" rx="1.5"/><path d="M301 168 L312 177 L323 168" fill="none"/>
+        <rect x="487" y="168" width="22" height="16" rx="1.5"/><path d="M487 168 L498 177 L509 168" fill="none"/>
+        <rect x="679" y="168" width="22" height="16" rx="1.5"/><path d="M679 168 L690 177 L701 168" fill="none"/>
+      </g>
+    </svg>
+
+    <!-- Phone -->
+    <svg class="phone" viewBox="0 0 360 214" role="img" aria-labelledby="f2p">
+      <title id="f2p">Example timeline over three weeks: one or two blog posts a week, each shared on X; standalone X posts bring the weekly X totals to 4, 5 and 3; a newsletter near the end of each week carries that week's blog posts.</title>
+      <defs>
+        <marker id="u-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8a8a8a"/></marker>
+        <marker id="u-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1c1c1c"/></marker>
+      </defs>
+
+      <text class="rl" x="12" y="16">Posts on X</text>
+      <circle cx="100" cy="12" r="4" fill="#1c1c1c"/>
+      <text class="sl" x="108" y="16">blog share</text>
+      <circle cx="178" cy="12" r="4" fill="#fff" stroke="#1c1c1c" stroke-width="1.25"/>
+      <text class="sl" x="186" y="16">standalone</text>
+      <text class="rl" x="12" y="86">Blog posts</text>
+      <text class="rl" x="12" y="140">Newsletter</text>
+
+      <g stroke="#bdbdbd" stroke-dasharray="3 3">
+        <line x1="12" y1="26" x2="12" y2="184"/><line x1="120" y1="26" x2="120" y2="184"/>
+        <line x1="228" y1="26" x2="228" y2="184"/><line x1="336" y1="26" x2="336" y2="184"/>
+      </g>
+      <line x1="12" y1="184" x2="348" y2="184" stroke="#1c1c1c" stroke-width="1.25" marker-end="url(#u-ink)"/>
+      <text class="wk" x="66" y="202">Week 1</text>
+      <text class="wk" x="174" y="202">Week 2</text>
+      <text class="wk" x="282" y="202">Week 3</text>
+      <text class="wk" x="66" y="40">4 X posts</text>
+      <text class="wk" x="174" y="40">5 X posts</text>
+      <text class="wk" x="282" y="40">3 X posts</text>
+
+      <g stroke="#8a8a8a" stroke-width="1" marker-end="url(#u-gray)">
+        <line x1="92" y1="97" x2="92" y2="60"/>
+        <line x1="134" y1="97" x2="134" y2="60"/>
+        <line x1="174" y1="97" x2="174" y2="60"/>
+        <line x1="276" y1="97" x2="276" y2="60"/>
+        <line x1="95" y1="109" x2="106" y2="147"/>
+        <line x1="137" y1="109" x2="210" y2="147"/>
+        <line x1="177" y1="109" x2="213" y2="147"/>
+        <line x1="279" y1="108" x2="320" y2="147"/>
+      </g>
+
+      <g fill="#1c1c1c">
+        <circle cx="92" cy="53" r="4.5"/><circle cx="134" cy="53" r="4.5"/>
+        <circle cx="174" cy="53" r="4.5"/><circle cx="276" cy="53" r="4.5"/>
+      </g>
+      <g fill="#fff" stroke="#1c1c1c" stroke-width="1.25">
+        <circle cx="24" cy="53" r="4.5"/><circle cx="46" cy="53" r="4.5"/><circle cx="68" cy="53" r="4.5"/>
+        <circle cx="154" cy="53" r="4.5"/><circle cx="194" cy="53" r="4.5"/><circle cx="214" cy="53" r="4.5"/>
+        <circle cx="248" cy="53" r="4.5"/><circle cx="306" cy="53" r="4.5"/>
+      </g>
+
+      <g fill="#2a64a8">
+        <circle cx="92" cy="103" r="6"/><circle cx="134" cy="103" r="6"/>
+        <circle cx="174" cy="103" r="6"/><circle cx="276" cy="103" r="6"/>
+      </g>
+
+      <g fill="#fff" stroke="#b0521d" stroke-width="1.5">
+        <rect x="100" y="150" width="20" height="14" rx="1.5"/><path d="M100 150 L110 158 L120 150" fill="none"/>
+        <rect x="207" y="150" width="20" height="14" rx="1.5"/><path d="M207 150 L217 158 L227 150" fill="none"/>
+        <rect x="314" y="150" width="20" height="14" rx="1.5"/><path d="M314 150 L324 158 L334 150" fill="none"/>
+      </g>
+    </svg>
+
+    <figcaption><b>Figure 2.</b> Timing, example only: a practical starting rhythm, not a rule. Each <span style="color:#2a64a8">●</span> is one blog post, 1–2 a week. On X, each ● shares one blog post and each ○ is a standalone post that needs no article or link; together they make 3–5 X posts a week. Replies are optional and not counted. Each <span style="color:#b0521d">✉</span> is one newsletter, carrying the blog posts published since the previous one.</figcaption>
+  </figure>
+</main>
+</body>
+</html>
