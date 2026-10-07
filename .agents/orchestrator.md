@@ -25,14 +25,7 @@ Subagents run in **Auto-review** mode by default. When a command a worker is aut
 
 ## Choosing models
 
-These are the user's preferences, confirmed in the live catalog on 2026-10-06. Check the catalog again at launch. If a preferred model isn't listed, tell the user instead of quietly substituting another.
-
-| Model | ID | Use for |
-| --- | --- | --- |
-| GPT-6 Astra, extra-high reasoning | `gpt-6-astra` | Orchestration and planning |
-| GPT-6.1 Sol, medium reasoning | `gpt-6.1-sol` | Coding, execution, and Git |
-| Claude Opus 5.5 | `claude-opus-5-5` | Writing, UI, creative work, and motion. It runs on a limited $20 subscription, so give it focused assignments. |
-| Grok 4.7 | `grok-4.7` | Mainly research on X |
+Follow the shared model guidance in [models.md](models.md).
 
 ## How a piece of work runs
 
@@ -56,7 +49,7 @@ Shared files, such as dependency lists or configuration, have one owner at a tim
 
 Workers make focused commits on their own branches. Nobody rewrites history, force-pushes, or changes another worker's branch without authorization.
 
-`AGENTS.md` and this guide are versioned policy. Any changes to them are committed before creating task worktrees that need to inherit them.
+`AGENTS.md`, this guide, and `models.md` are versioned policy. Any changes to them are committed before creating task worktrees that need to inherit them.
 
 ### 4. Keep the record
 
@@ -82,7 +75,7 @@ How closely to look depends on the size and risk of the task. A small documentat
 
 ### 7. Combine, test, and push
 
-One Codex worker (GPT-6.1 Sol) is assigned to combine the accepted work. It merges the accepted task branches into the integration branch chosen for the work, resolves any conflicts, runs the relevant checks, and pushes.
+One worker, using the coding and Git model from the shared model guidance, is assigned to combine the accepted work. It merges the accepted task branches into the integration branch chosen for the work, resolves any conflicts, runs the relevant checks, and pushes.
 
 Before pushing, it checks what the push will deploy. If the push would change the live site and that release hasn't been authorized, the worker stops and explains why in its thread instead of pushing. Changes to `main`, the live deployment, domains, or the Vercel Git connection all need release authorization from the user. Once the user has authorized a release, nobody asks again.
 
