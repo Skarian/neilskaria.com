@@ -569,6 +569,13 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			const every = Math.max(1, Math.floor(count / 4000));
 			const points: THREE.Vector3[] = [];
 			for (const [mesh] of parts) {
+				// The bonsai's foliage holds room to grow wild: its shape is taken as it looks neat.
+				if (mesh.name === 'BonsaiShoots') {
+					for (const shoot of bonsai.shoots)
+						for (const node of shoot.nodes.slice(0, shoot.neat))
+							points.push(node.clone().applyMatrix4(bonsai.turntable.matrixWorld));
+					continue;
+				}
 				const position = mesh.geometry.attributes.position;
 				for (let i = 0; i < position.count; i += every)
 					points.push(
@@ -787,54 +794,103 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			if (o instanceof THREE.Mesh && thingOf(o) === thing) parts.push(o);
 		});
 		const box = new THREE.Box3();
-		for (const o of parts) box.expandByObject(o);
-		const centre = box.getCenter(new THREE.Vector3());
-		let size = box.getSize(new THREE.Vector3()).length();
+		// (The bonsai's slate is left out: the tree and its pot are what's framed.)
+		for (const o of parts) if (!/^Bonsai(Shoots|Slate)/.test(o.name)) box.expandByObject(o);
+		// The bonsai is measured as it looks neat (its foliage's geometry includes room to grow wild).
+		if (thing === 'bonsai') {
+			bonsai.turntable.updateMatrixWorld();
+			for (const shoot of bonsai.shoots)
+				for (const node of shoot.nodes.slice(0, shoot.neat))
+					box.expandByPoint(node.clone().applyMatrix4(bonsai.turntable.matrixWorld));
+		}
 		// The cube is looked at where it's lifted to, whatever it's doing now.
 		if (thing === 'cube') {
-			centre.copy(cubeCentre).add(CUBE_LIFT);
-			size = cubeSize * Math.sqrt(3);
+			const half = new THREE.Vector3().setScalar(cubeSize / 2);
+			const lifted = cubeCentre.clone().add(CUBE_LIFT);
+			box.set(lifted.clone().sub(half), lifted.clone().add(half));
 		}
+		const centre = box.getCenter(new THREE.Vector3());
+		const size = box.getSize(new THREE.Vector3()).length();
 		const dir = (FOCUS_FROM[thing] ?? new THREE.Vector3(0.12, 0.22, 1)).clone().normalize();
 		// The cube is small: further back, so there's room to turn it over.
 		// The cube is small, so further back to leave room to turn it over; the clock radio is wide, so
 		// closer in, to read its dial.
-		const distance =
-			{
-				cube: camera.aspect > 1 ? 2.75 : 2.15,
-				clock: camera.aspect > 1 ? 1.5 : 1.47,
-				bonsai: camera.aspect > 1 ? 1.08 : 0.98
-			}[thing as string] ?? (camera.aspect > 1 ? 2.1 : 1.85);
-		// On phones the panel covers the bottom of the screen: the object is fitted into the space left
-		// above it (further back when that's small) and centred there.
 		const portrait = camera.aspect <= 1;
-		// On wider screens the panel's on the right: likewise, the object goes in the space to its left.
-		let d =
-			size *
-			distance *
+		// How much of the space it's given each object fills (the cube less, to leave room to turn it).
+		const fill =
 			(portrait
-				? THREE.MathUtils.clamp(0.5 / freeAbove, 0.8, 1.5)
-				: THREE.MathUtils.clamp(0.58 / freeLeft, 0.9, 1.5));
-		// And the clock radio (the wide one) never wider than the space it has.
-		if (thing === 'clock') {
-			const extent = box.getSize(new THREE.Vector3());
-			const across = Math.hypot(extent.x, extent.z);
-			const space = portrait ? 1 : freeLeft * 0.9;
-			const halfWidth = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect * space;
-			d = Math.max(d, (across * 0.52) / halfWidth);
-		}
+				? { cube: 0.4, clock: 0.9, bonsai: 0.97, lantern: 0.8 }
+				: { cube: 0.55, clock: 0.9, bonsai: 0.8, lantern: 0.85 })[thing as string] ?? 0.8;
+		let d = size * 2;
 		const eye = centre.clone().addScaledVector(dir, d);
-		// Aim right of the object, so it sits centred in the space left of the panel.
-		const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), dir).normalize();
 		const target = centre.clone();
-		if (!portrait) {
-			const halfWidth = d * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect;
-			target.addScaledVector(right, (1 - freeLeft) * halfWidth);
+		// Then measure where the object actually lands on screen, and pan until it's centred in the
+		// space the panel leaves: above it on phones (below the buttons at the top), left of it on wider
+		// screens. A few rounds settle it.
+		const want = portrait
+			? new THREE.Vector2(0, 1 - (0.07 + freeAbove))
+			: new THREE.Vector2(freeLeft - 1, -0.04);
+		const probe = camera.clone();
+		// Points across the object's actual shape (a box's corners would overstate it).
+		const corners: THREE.Vector3[] = [];
+		if (thing === 'cube')
+			for (let k = 0; k < 8; k++)
+				corners.push(
+					new THREE.Vector3(
+						k & 1 ? box.max.x : box.min.x,
+						k & 2 ? box.max.y : box.min.y,
+						k & 4 ? box.max.z : box.min.z
+					)
+				);
+		else {
+			for (const o of parts) {
+				if (!(o instanceof THREE.Mesh) || /^Bonsai(Shoots|Slate)/.test(o.name)) continue;
+				const position = o.geometry.attributes.position;
+				const every = Math.max(1, Math.floor(position.count / 600));
+				for (let i = 0; i < position.count; i += every)
+					corners.push(
+						new THREE.Vector3().fromBufferAttribute(position, i).applyMatrix4(o.matrixWorld)
+					);
+			}
+			if (thing === 'bonsai')
+				for (const shoot of bonsai.shoots)
+					for (const node of shoot.nodes.slice(0, shoot.neat))
+						corners.push(node.clone().applyMatrix4(bonsai.turntable.matrixWorld));
 		}
-		if (portrait) {
-			const up = new THREE.Vector3(0, 1, 0).addScaledVector(dir, -dir.y).normalize();
-			const halfHeight = d * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-			target.addScaledVector(up, -(1 - freeAbove) * halfHeight);
+		const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+		// The space, in screen units (-1 to 1 across and up).
+		const room = portrait
+			? new THREE.Vector2(2, 2 * (freeAbove - 0.07))
+			: new THREE.Vector2(2 * freeLeft, 1.9);
+		for (let round = 0; round < 6; round++) {
+			probe.position.copy(eye);
+			probe.lookAt(target);
+			probe.updateMatrixWorld();
+			const lo = new THREE.Vector2(Infinity, Infinity);
+			const hi = new THREE.Vector2(-Infinity, -Infinity);
+			for (const corner of corners) {
+				const p = corner.clone().project(probe);
+				lo.min(new THREE.Vector2(p.x, p.y));
+				hi.max(new THREE.Vector2(p.x, p.y));
+			}
+			// Closer or further, so it fills its share of the space...
+			const extent = hi.clone().sub(lo);
+			const scale = Math.max(extent.x / room.x, extent.y / room.y) / fill;
+			d *= scale;
+			eye.copy(target).addScaledVector(dir, d);
+			// ...and across, so it's centred in it.
+			const off = lo.add(hi).multiplyScalar(0.5).sub(want).divideScalar(scale);
+			const depth = eye.distanceTo(target);
+			const pan = new THREE.Vector3()
+				.setFromMatrixColumn(probe.matrixWorld, 0)
+				.multiplyScalar(off.x * depth * tan * camera.aspect)
+				.add(
+					new THREE.Vector3()
+						.setFromMatrixColumn(probe.matrixWorld, 1)
+						.multiplyScalar(off.y * depth * tan)
+				);
+			eye.add(pan);
+			target.add(pan);
 		}
 		return { eye, target };
 	}

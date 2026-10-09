@@ -553,12 +553,27 @@
 		</aside>
 	{/if}
 
-	<div class="corner" class:raised={focused}>
-		<button onclick={toggleSound} aria-pressed={!radio.muted}
-			>{radio.muted ? 'SOUND OFF' : 'SOUND ON'}</button
+	<div class="corner">
+		<button
+			class="pill"
+			role="switch"
+			aria-checked={!radio.muted}
+			aria-label="Sound"
+			onclick={toggleSound}
 		>
+			<svg class="note" viewBox="0 0 24 24" aria-hidden="true"
+				><path d="M9 18V5l11-2v13" /><circle cx="6" cy="18" r="3" /><circle
+					cx="17"
+					cy="16"
+					r="3"
+				/></svg
+			>
+			<span class="toggle" aria-hidden="true"><span></span></span>
+		</button>
 		{#if phase !== 'page'}
-			<button onclick={() => engine?.skipToSite()}>SKIP TO SITE</button>
+			<button class="pill" onclick={() => engine?.skipToSite()}
+				>SKIP <span aria-hidden="true">▸</span></button
+			>
 		{/if}
 	</div>
 </div>
@@ -576,6 +591,13 @@
 
 	:global(html[data-intro]) .room-layer {
 		display: block;
+	}
+
+	/* While the room's up, the page behind it is the room's colour too, so a phone's browser bar
+	   sliding away never uncovers a strip of white. */
+	:global(html[data-intro]),
+	:global(html[data-intro] body) {
+		background: #0b0a0e;
 	}
 
 	canvas {
@@ -1338,11 +1360,6 @@
 			height: 2.2rem;
 		}
 
-		.corner.raised {
-			top: 0.9rem;
-			bottom: auto;
-		}
-
 		/* The buttons share the width, so they never spill out, whatever the text size. */
 		.panel .actions {
 			width: 100%;
@@ -1373,24 +1390,72 @@
 		}
 	}
 
+	/* Top right: a sound switch (a music note and a toggle, like the radio's power) and SKIP. */
 	.corner {
 		position: absolute;
-		right: 1.25rem;
-		bottom: 1.25rem;
+		top: 1rem;
+		right: 1rem;
 		display: flex;
-		gap: 1.25rem;
-		font-size: 0.7rem;
+		gap: 0.6rem;
+	}
+
+	.pill {
+		--ink: #3a2618;
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+		height: 2.2rem;
+		padding: 0 0.85rem;
+		border: 3px solid var(--ink);
+		border-radius: 999px;
+		background: #fffaf0;
+		color: var(--ink);
+		font-family: 'Arial Black', 'Helvetica Neue', Arial, sans-serif;
+		font-style: italic;
+		font-size: 0.72rem;
 		letter-spacing: 0.15em;
-	}
-
-	.corner button {
 		cursor: pointer;
-		color: rgb(243 236 226 / 0.65);
-		text-shadow: 0 1px 6px rgb(0 0 0 / 0.6);
+		box-shadow: 0 3px 0 var(--ink);
+		transition:
+			translate 0.08s,
+			box-shadow 0.08s;
 	}
 
-	.corner button:hover {
-		color: #fff;
+	.pill:active {
+		translate: 0 2px;
+		box-shadow: 0 1px 0 var(--ink);
+	}
+
+	.note {
+		width: 1.05rem;
+		height: 1.05rem;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 2.4;
+		stroke-linejoin: round;
+	}
+
+	.note circle {
+		fill: currentColor;
+	}
+
+	.pill .toggle {
+		width: 2rem;
+		height: 1.15rem;
+		border-width: 2.5px;
+	}
+
+	.pill .toggle span {
+		width: 0.7rem;
+		height: 0.7rem;
+	}
+
+	.pill[aria-checked='true'] .toggle {
+		background: #4fd66e;
+	}
+
+	.pill[aria-checked='true'] .toggle span {
+		left: calc(100% - 0.7rem - 0.12rem);
 	}
 
 	@keyframes blink {

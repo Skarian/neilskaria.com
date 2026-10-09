@@ -71,3 +71,11 @@
 		</main>
 	</div>
 </ScreenFrame>
+
+<style>
+	/* Below the page (where a phone's browser bar slides away), paper, not white. */
+	:global(html),
+	:global(body) {
+		background: #f6f1e7;
+	}
+</style>
