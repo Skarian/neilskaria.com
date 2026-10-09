@@ -811,7 +811,13 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		}
 		const centre = box.getCenter(new THREE.Vector3());
 		const size = box.getSize(new THREE.Vector3()).length();
-		const dir = (FOCUS_FROM[thing] ?? new THREE.Vector3(0.12, 0.22, 1)).clone().normalize();
+		// On upright screens the wide clock radio is looked down on from higher up, so it isn't just a
+		// thin strip seen edge-on.
+		const from =
+			camera.aspect <= 1 && thing === 'clock'
+				? new THREE.Vector3(0.2, 0.85, 1)
+				: (FOCUS_FROM[thing] ?? new THREE.Vector3(0.12, 0.22, 1));
+		const dir = from.clone().normalize();
 		// The cube is small: further back, so there's room to turn it over.
 		// The cube is small, so further back to leave room to turn it over; the clock radio is wide, so
 		// closer in, to read its dial.
