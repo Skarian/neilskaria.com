@@ -625,24 +625,19 @@ def build(bake_albedo, top, woodgrain):
 	baked, foliage_all, unbaked = [], [], []
 
 	cube = rubiks()
-	place_group(cube, Vector((-1.35, -0.85, top)), math.radians(-24))
+	place_group(cube, Vector((-1.75, -0.95, top)), math.radians(-22))
 	unbaked += cube
 
 	# The clock radio, back-left, angled towards the camera.
 	clock_body, clock_display, clock_digits, clock_parts = clock_radio(woodgrain)
-	place_group([clock_body, clock_display, clock_digits, *clock_parts], Vector((-0.75, 1.15, top)), math.radians(28))
+	place_group([clock_body, clock_display, clock_digits, *clock_parts], Vector((-1.15, 1.05, top)), math.radians(7))
 	baked += [clock_body, *clock_parts]
 	unbaked += [clock_display, clock_digits]
 
-	solid, chrome = tumbler()
-	# Back-right corner, beside the lantern.
-	place_group([solid, chrome], Vector((1.95, 1.25, top)), math.radians(-14))
-	baked.append(solid)
-	unbaked.append(chrome)
 
 	wood_and_pot, foliage = bonsai(bake_albedo)
 	# At the right edge, scaled down a little, so its cascade hangs off the side of the table.
-	place_group(wood_and_pot + foliage, Vector((1.25, -0.7, top)), math.radians(6), 0.7)
+	place_group(wood_and_pot + foliage, Vector((1.6, -0.75, top)), math.radians(6), 0.7)
 	baked += wood_and_pot
 	foliage_all += foliage
 	return baked, foliage_all, unbaked

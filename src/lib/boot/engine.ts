@@ -74,12 +74,8 @@ export function startView(aspect: number) {
 			};
 	}
 	return aspect < 1
-		? {
-				eye: new THREE.Vector3(0.4, 5.8, 6.4),
-				target: new THREE.Vector3(0.15, 0.1, -0.15),
-				fov: 60
-			}
-		: { eye: new THREE.Vector3(0.8, 4.4, 5.2), target: new THREE.Vector3(0, 0.3, -0.15), fov: 40 };
+		? { eye: new THREE.Vector3(0, 5.0, 6.8), target: new THREE.Vector3(0, 0.2, -0.2), fov: 70 }
+		: { eye: new THREE.Vector3(0.7, 2.9, 6.4), target: new THREE.Vector3(0, 0.65, -0.2), fov: 38 };
 }
 
 export async function createRoom(options: RoomOptions): Promise<Room> {

@@ -319,7 +319,7 @@ for obj in foliage:
 	add('foliage', obj)
 
 # A kumiko lantern stands where a lamp would; its bulb is the warm light in the bake.
-lamp_x, lamp_y = 0.95, 1.2
+lamp_x, lamp_y = 1.35, 1.3
 lantern_parts, lantern_paper, lantern_light = props.kumiko_lantern()
 for obj in lantern_parts + [lantern_paper]:
 	obj.location = Vector((lamp_x, lamp_y, TOP)) + obj.location
