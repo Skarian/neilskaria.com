@@ -15,6 +15,7 @@ import { createBootSound } from './sound';
 
 export type RoomMode = 'room' | 'booting' | 'site' | 'returning';
 export type Hover = { label: string; x: number; y: number } | null;
+export type Thing = 'sp' | 'cube' | 'clock' | 'lantern' | 'bonsai';
 
 export type RoomOptions = {
 	canvas: HTMLCanvasElement;
@@ -28,23 +29,26 @@ export type RoomOptions = {
 	onProgress: (progress: number) => void;
 	onMode: (mode: RoomMode) => void;
 	onHover: (hover: Hover) => void;
+	// An object's mini-game has opened (or closed, with null).
+	onFocus: (thing: Thing | null) => void;
 };
 
 export type Room = {
 	enterSite: () => void;
 	skipToSite: () => void;
 	returnToRoom: () => void;
+	unfocus: () => void;
+	// The lantern: a colour (any CSS colour) and a brightness from 0 to 1.5.
+	setLantern: (color: string, level: number) => void;
 	setMuted: (muted: boolean) => void;
 	dispose: () => void;
 };
-
-type Thing = 'sp' | 'cube' | 'clock' | 'lantern' | 'bonsai';
 
 const LABELS: Record<Thing, string> = {
 	sp: 'Game Boy Advance SP · open the site',
 	cube: "Rubik's cube · coming soon",
 	clock: 'Clock radio · coming soon',
-	lantern: 'Kumiko lantern · click to switch',
+	lantern: 'Kumiko lantern · change the light',
 	bonsai: 'Bonsai · coming soon'
 };
 
@@ -53,6 +57,8 @@ const PITCH = OPEN - Math.PI / 2;
 const FLOAT = new THREE.Vector3(0, 1.45, 0.9);
 const CAMERA_NEAR = new THREE.Vector3(0.9, 1.9, 6);
 const LANTERN_PAPER = new THREE.Color('#ffa24a').multiplyScalar(1.15);
+// The colour the lantern's bulb was baked with (linear), so other colours can be expressed relative to it.
+const LANTERN_BAKED = new THREE.Color(1.0, 0.62, 0.3);
 
 // Landscape screens see the bed and the bedside table; portrait screens centre on the table.
 export function startView(aspect: number) {
@@ -62,7 +68,7 @@ export function startView(aspect: number) {
 }
 
 export async function createRoom(options: RoomOptions): Promise<Room> {
-	const { canvas, layer, background, onProgress, onMode, onHover } = options;
+	const { canvas, layer, background, onProgress, onMode, onHover, onFocus } = options;
 
 	const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 	renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -111,7 +117,11 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		dive: 0
 	};
 	const hover = { sp: 0 };
-	const lantern = { level: 1 };
+	const lantern = { level: 1, color: new THREE.Color().copy(LANTERN_BAKED) };
+	const focusBlend = { value: 0 };
+	const focusView = { eye: new THREE.Vector3(), target: new THREE.Vector3() };
+	let focused: Thing | null = null;
+	let screenOff = false;
 	const lampTint = { value: new THREE.Color(1, 1, 1) };
 	const pointer = new THREE.Vector2();
 	const parallax = new THREE.Vector2();
@@ -231,7 +241,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	// the visible corner of the room is modelled, so a warm colour stands in for the rest of it.
 	sp.visible = false;
 	const pmrem = new THREE.PMREMGenerator(renderer);
-	scene.background = new THREE.Color(0.46, 0.36, 0.3);
+	scene.background = new THREE.Color(0.66, 0.52, 0.42);
 	const envMap = pmrem.fromScene(scene, 0.02, 0.05, 100, { position: FLOAT }).texture;
 	scene.background = new THREE.Color('#120f0c');
 	pmrem.dispose();
@@ -239,8 +249,15 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	for (const material of live) {
 		material.envMap = envMap;
 		// Matched by eye to the baked props beside it.
-		material.envMapIntensity = 2.6;
+		material.envMapIntensity = 1.6;
 	}
+
+	const key = new THREE.DirectionalLight('#ffe2c4', 1.5);
+	key.position.set(2.5, 5, 10);
+	scene.add(key);
+	const fill = new THREE.DirectionalLight('#ffd0a0', 0.5);
+	fill.position.set(-6, 2, 6);
+	scene.add(fill);
 
 	// Dust drifting in the light.
 	const moteCount = 140;
@@ -338,11 +355,66 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		screenMaterial.needsUpdate = true;
 	}
 
-	function setLantern(level: number) {
-		lampTint.value.setScalar(level);
-		for (const material of paperMaterials) {
-			material.color.copy(LANTERN_PAPER).multiplyScalar(0.25 + 0.75 * level);
-		}
+	// Tints the lantern's baked light (and its glowing paper) towards a colour, at a brightness.
+	function applyLantern() {
+		const { color, level } = lantern;
+		lampTint.value
+			.setRGB(color.r / LANTERN_BAKED.r, color.g / LANTERN_BAKED.g, color.b / LANTERN_BAKED.b)
+			.multiplyScalar(level);
+		const paper = new THREE.Color().copy(color);
+		paper.multiplyScalar(1.6 / Math.max(paper.r, paper.g, paper.b));
+		for (const material of paperMaterials)
+			material.color.copy(paper).multiplyScalar(0.18 + 0.6 * level);
+	}
+
+	function setLantern(css: string, level: number) {
+		const target = new THREE.Color(css);
+		gsap.to(lantern.color, {
+			r: target.r,
+			g: target.g,
+			b: target.b,
+			duration: 0.5,
+			ease: 'power2.out',
+			onUpdate: applyLantern
+		});
+		gsap.to(lantern, { level, duration: 0.5, ease: 'power2.out', onUpdate: applyLantern });
+	}
+
+	// Where the camera goes to look at an object up close, leaving room on the right for its panel.
+	function viewOf(thing: Thing) {
+		const parts: THREE.Object3D[] = [];
+		gltf.scene.traverse((o) => {
+			if (o instanceof THREE.Mesh && thingOf(o) === thing) parts.push(o);
+		});
+		const box = new THREE.Box3();
+		for (const o of parts) box.expandByObject(o);
+		const centre = box.getCenter(new THREE.Vector3());
+		const size = box.getSize(new THREE.Vector3()).length();
+		const dir = new THREE.Vector3(0.12, 0.22, 1).normalize();
+		const eye = centre.clone().addScaledVector(dir, size * 2.1);
+		// Aim a little right of the object, so it sits left of centre with the panel beside it.
+		const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), dir).normalize();
+		const target = centre.clone().addScaledVector(right, size * (camera.aspect > 1 ? 0.55 : 0));
+		if (camera.aspect <= 1) target.y -= size * 0.35;
+		return { eye, target };
+	}
+
+	function focus(thing: Thing) {
+		if (mode !== 'room' || focused) return;
+		focused = thing;
+		setHovered(null);
+		const v = viewOf(thing);
+		focusView.eye.copy(v.eye);
+		focusView.target.copy(v.target);
+		gsap.to(focusBlend, { value: 1, duration: 1.1, ease: 'power3.inOut' });
+		onFocus(thing);
+	}
+
+	function unfocus() {
+		if (!focused) return;
+		focused = null;
+		gsap.to(focusBlend, { value: 0, duration: 1.0, ease: 'power3.inOut' });
+		onFocus(null);
 	}
 
 	function render(time: number) {
@@ -362,10 +434,16 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			camera.position.lerpVectors(CAMERA_NEAR, finalPos, s.dive);
 			camera.quaternion.slerpQuaternions(nearQuat, finalQuat, s.dive);
 		} else {
+			const f = focusBlend.value;
+			const look = new THREE.Vector3().lerpVectors(view.target, FLOAT, s.drift);
 			camera.position.lerpVectors(view.eye, CAMERA_NEAR, s.drift);
-			camera.position.x += parallax.x * 0.35 * calm;
-			camera.position.y += parallax.y * 0.2 * calm;
-			camera.lookAt(new THREE.Vector3().lerpVectors(view.target, FLOAT, s.drift));
+			camera.position.x += parallax.x * 0.35 * calm * (1 - f * 0.8);
+			camera.position.y += parallax.y * 0.2 * calm * (1 - f * 0.8);
+			if (f > 0) {
+				camera.position.lerp(focusView.eye, f);
+				look.lerp(focusView.target, f);
+			}
+			camera.lookAt(look);
 		}
 
 		const tick = Math.floor(Date.now() / 500);
@@ -375,8 +453,11 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			clockTexture.needsUpdate = true;
 		}
 
-		if (s.boot >= 0) {
-			drawBootScreen(screenCtx, s.boot, background);
+		if (s.boot >= 0 && !screenOff) {
+			if (mode === 'returning') {
+				screenCtx.fillStyle = background;
+				screenCtx.fillRect(0, 0, screenCanvas.width, screenCanvas.height);
+			} else drawBootScreen(screenCtx, s.boot, background);
 			screenTexture.needsUpdate = true;
 		}
 		renderer.render(scene, camera);
@@ -397,16 +478,18 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			-((event.clientY - rect.top) / rect.height) * 2 + 1
 		);
 		raycaster.setFromCamera(ndc, camera);
-		for (const hit of raycaster.intersectObject(gltf.scene, true)) {
-			for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) {
-				if (o === sp) return 'sp';
-				if (/^Cube/.test(o.name)) return 'cube';
-				if (/^Clock/.test(o.name)) return 'clock';
-				if (/^(Kumiko|LanternPaper)/.test(o.name)) return 'lantern';
-				if (/^Bonsai/.test(o.name)) return 'bonsai';
-			}
-			// The first thing hit blocks anything behind it.
-			return null;
+		const hit = raycaster.intersectObject(gltf.scene, true)[0];
+		// The first thing hit blocks anything behind it.
+		return hit ? thingOf(hit.object) : null;
+	}
+
+	function thingOf(object: THREE.Object3D): Thing | null {
+		for (let o: THREE.Object3D | null = object; o; o = o.parent) {
+			if (o === sp) return 'sp';
+			if (/^Cube/.test(o.name)) return 'cube';
+			if (/^Clock/.test(o.name)) return 'clock';
+			if (/^(Kumiko|LanternPaper)/.test(o.name)) return 'lantern';
+			if (/^Bonsai/.test(o.name)) return 'bonsai';
 		}
 		return null;
 	}
@@ -417,7 +500,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			((event.clientX - rect.left) / rect.width) * 2 - 1,
 			-((event.clientY - rect.top) / rect.height) * 2 + 1
 		);
-		if (mode !== 'room') return;
+		if (mode !== 'room' || focused) return;
 		const thing = event.pointerType === 'mouse' ? thingAt(event) : null;
 		setHovered(thing, event);
 	}
@@ -437,17 +520,10 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	}
 
 	function click(event: MouseEvent) {
-		if (mode !== 'room') return;
+		if (mode !== 'room' || focused) return;
 		const thing = thingAt(event);
 		if (thing === 'sp') return enterSite();
-		if (thing === 'lantern') {
-			gsap.to(lantern, {
-				level: lantern.level > 0.5 ? 0 : 1,
-				duration: 0.6,
-				ease: 'power2.out',
-				onUpdate: () => setLantern(lantern.level)
-			});
-		}
+		if (thing === 'lantern') return focus('lantern');
 		// Touch has no hover, so a tap shows the label instead.
 		if (thing) onHover({ label: LABELS[thing], x: event.clientX, y: event.clientY });
 	}
@@ -494,6 +570,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 
 	async function enterSite() {
 		if (mode !== 'room') return;
+		screenOff = false;
+		unfocus();
 		setHovered(null);
 		await sound.resume();
 		timeline?.kill();
@@ -522,9 +600,19 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		timeline = timelineFor();
 		timeline.progress(1, true);
 		power(true);
-		timeline.eventCallback('onReverseComplete', () => setMode('room'));
+		timeline.eventCallback('onReverseComplete', () => {
+			timeline?.timeScale(1);
+			setMode('room');
+		});
+		screenOff = false;
 		setMode('returning');
-		timeline.reverse();
+		// Played a little faster than the boot; once the page has faded into the screen, the screen
+		// switches off (no logo in reverse) and the power light goes out.
+		timeline.timeScale(1.6).reverse();
+		gsap.delayedCall(0.55, () => {
+			screenOff = true;
+			power(false);
+		});
 	}
 
 	function dispose() {
@@ -559,6 +647,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		enterSite,
 		skipToSite,
 		returnToRoom,
+		unfocus,
+		setLantern,
 		setMuted: (muted) => sound.setMuted(muted),
 		dispose
 	};
