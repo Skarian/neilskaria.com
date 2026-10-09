@@ -188,7 +188,14 @@
 
 	{#if phase === 'room' && !focused}
 		<div class="start">
-			<button class:pressed onclick={start} aria-label="Start: open the site" data-start>
+			<button
+				class:pressed
+				onclick={start}
+				aria-label="Start: open the site"
+				data-start
+				in:pop={{ delay: 450 }}
+				out:pop={{ duration: 220 }}
+			>
 				START
 			</button>
 		</div>
@@ -299,7 +306,6 @@
 		flex-direction: column;
 		align-items: center;
 		gap: 0.7rem;
-		animation: rise 0.8s 0.5s both cubic-bezier(0.2, 0.7, 0.2, 1);
 	}
 
 	/* A chunky Game Boy-style rubber pill with START on it, which visibly presses. */
@@ -332,8 +338,7 @@
 		inherits: false;
 	}
 
-	.start button::before,
-	.start button::after {
+	.start button::before {
 		content: '';
 		position: absolute;
 		inset: -3px;
@@ -349,28 +354,27 @@
 		);
 		animation: orbit 3s linear infinite;
 		pointer-events: none;
-	}
-
-	.start button::before {
 		padding: 3px;
 		mask:
 			linear-gradient(#000 0 0) content-box exclude,
 			linear-gradient(#000 0 0);
 	}
 
-	.start button::after {
-		z-index: -1;
-		filter: blur(12px);
-		opacity: 0.35;
-		transition: opacity 0.25s;
-	}
-
-	.start button:hover::after {
-		opacity: 0.75;
+	.start button::before {
+		transition: filter 0.2s;
 	}
 
 	.start button:hover {
 		color: #fff6ea;
+		translate: 0 -2px;
+		box-shadow:
+			0 7px 0 #17151b,
+			0 12px 22px rgb(0 0 0 / 0.5),
+			inset 0 1px 0 rgb(255 255 255 / 0.28);
+	}
+
+	.start button:hover::before {
+		filter: brightness(1.2) saturate(1.3);
 	}
 
 	@keyframes orbit {
@@ -651,18 +655,10 @@
 		}
 	}
 
-	@keyframes rise {
-		from {
-			opacity: 0;
-			translate: -50% 12px;
-		}
-	}
-
 	@media (prefers-reduced-motion: reduce) {
 		.loading,
 		.start,
-		.start button::before,
-		.start button::after {
+		.start button::before {
 			animation: none;
 		}
 	}
