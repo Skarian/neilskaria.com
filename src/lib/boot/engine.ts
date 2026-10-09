@@ -413,6 +413,12 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	}
 
 	// Where the camera goes to look at an object up close, leaving room on the right for its panel.
+	// The direction each object is looked at from when focused (towards the camera), chosen so nothing
+	// stands in front of it; the default is from the front, slightly right and above.
+	const FOCUS_FROM: Partial<Record<Thing, THREE.Vector3>> = {
+		lantern: new THREE.Vector3(-0.62, 0.22, 0.75)
+	};
+
 	function viewOf(thing: Thing) {
 		const parts: THREE.Object3D[] = [];
 		gltf.scene.traverse((o) => {
@@ -422,7 +428,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		for (const o of parts) box.expandByObject(o);
 		const centre = box.getCenter(new THREE.Vector3());
 		const size = box.getSize(new THREE.Vector3()).length();
-		const dir = new THREE.Vector3(0.12, 0.22, 1).normalize();
+		const dir = (FOCUS_FROM[thing] ?? new THREE.Vector3(0.12, 0.22, 1)).clone().normalize();
 		const eye = centre.clone().addScaledVector(dir, size * 2.1);
 		// Aim a little right of the object, so it sits left of centre with the panel beside it.
 		const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), dir).normalize();

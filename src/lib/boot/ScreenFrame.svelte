@@ -74,6 +74,12 @@
 		background: repeating-linear-gradient(0deg, rgb(20 12 40 / 0.07) 0 1px, transparent 1px 3px);
 		mix-blend-mode: multiply;
 		animation: roll 8s linear infinite;
+		transition: opacity 0.6s ease;
+	}
+
+	/* Scanlines belong to the page's screen, not the 3D room, where they'd sit still over a moving scene. */
+	:global(html[data-intro]) .scanlines {
+		opacity: 0;
 	}
 
 	.glass {

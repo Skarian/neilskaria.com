@@ -193,7 +193,6 @@
 			<button class:pressed onclick={start} aria-label="Start: open the site" data-start
 				>START</button
 			>
-			<p>or click the Game Boy</p>
 		</div>
 	{/if}
 
@@ -233,7 +232,16 @@
 				/>
 				<span class="end" aria-hidden="true">☀</span>
 			</label>
-			<button class="back" onclick={() => engine?.unfocus()}>◀ BACK</button>
+			<div class="actions">
+				<button
+					class="back reset"
+					onclick={() => {
+						lanternColor = LANTERN_COLORS[0].css;
+						lanternLevel = 1;
+					}}>↺ RESET</button
+				>
+				<button class="back" onclick={() => engine?.unfocus()}>◀ BACK</button>
+			</div>
 		</aside>
 	{/if}
 
@@ -342,12 +350,6 @@
 		outline-offset: 5px;
 	}
 
-	.start p {
-		font-size: 0.7rem;
-		letter-spacing: 0.12em;
-		color: rgb(243 236 226 / 0.7);
-		text-shadow: 0 1px 6px rgb(0 0 0 / 0.6);
-	}
 
 	/* Game-style dialog: a cream card with a thick outline and a hard drop shadow. */
 	.panel {
@@ -370,6 +372,23 @@
 		box-shadow:
 			0 7px 0 var(--ink),
 			0 18px 40px rgb(0 0 0 / 0.45);
+	}
+
+	/* Bigger on desktop, where the room leaves plenty of space. */
+	@media (min-width: 900px) and (min-height: 600px) {
+		.panel {
+			zoom: 1.3;
+		}
+	}
+
+	.actions {
+		display: flex;
+		gap: 0.6rem;
+	}
+
+	.reset {
+		background: #fbf1df;
+		color: var(--ink);
 	}
 
 	.ribbon {

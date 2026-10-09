@@ -36,6 +36,13 @@ export function bakedMaterial(
 		shader.uniforms.lampScale = { value: lighting.lampScale * Math.PI };
 		shader.uniforms.lampTint = lighting.lampTint;
 		shader.uniforms.glow = { value: options.glow ?? new THREE.Color(0, 0, 0) };
+		// Foliage gets a soft fill on the side facing the camera: the lantern lights it from behind,
+		// which on its own leaves the leaves we see in shadow.
+		shader.uniforms.fill = {
+			value: options.sway
+				? new THREE.Color('#ffd9a8').multiplyScalar(0.55)
+				: new THREE.Color(0, 0, 0)
+		};
 		shader.fragmentShader = shader.fragmentShader
 			.replace(
 				'#include <lightmap_pars_fragment>',
@@ -43,7 +50,8 @@ export function bakedMaterial(
 				uniform sampler2D lampMap;
 				uniform float lampScale;
 				uniform vec3 lampTint;
-				uniform vec3 glow;`
+				uniform vec3 glow;
+				uniform vec3 fill;`
 			)
 			.replace(
 				'reflectedLight.indirectDiffuse += lightMapTexel.rgb * lightMapIntensity * RECIPROCAL_PI;',
@@ -52,7 +60,7 @@ export function bakedMaterial(
 			)
 			.replace(
 				'vec3 outgoingLight = reflectedLight.indirectDiffuse;',
-				'vec3 outgoingLight = reflectedLight.indirectDiffuse + diffuseColor.rgb * glow * lampTint;'
+				'vec3 outgoingLight = reflectedLight.indirectDiffuse + diffuseColor.rgb * ( glow * lampTint + fill );'
 			);
 		if (options.sway) {
 			// A very gentle sway: whole pads drift slowly, more towards the top of the tree, with a
