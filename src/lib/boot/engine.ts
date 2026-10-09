@@ -10,7 +10,8 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { introAssets, lightmapScales } from './assets';
 import { bakedMaterial, loadBakedLighting, swayTime, type BakedLighting } from './baked-material';
 import { BOOT_DURATION, drawBootScreen } from './boot-screen';
-import { drawClockLED } from './clock-led';
+import { drawClockLED, drawFrequencyLED } from './clock-led';
+import { FM_MAX, FM_MIN, STATIONS, stationAt, type Station } from './radio';
 import {
 	createRubiks,
 	decodeMove,
@@ -24,6 +25,19 @@ import { createBootSound } from './sound';
 
 export type RoomMode = 'room' | 'booting' | 'site' | 'returning';
 export type Thing = 'sp' | 'cube' | 'clock' | 'lantern' | 'bonsai';
+
+// The clock radio, as the panel shows it.
+export type RadioState = {
+	on: boolean;
+	// FM, in MHz.
+	freq: number;
+	volume: number;
+	// The station coming in clearly, if any.
+	station: string | null;
+	// Every station, and the band the dial covers.
+	stations: Station[];
+	band: [number, number];
+};
 
 // The Rubik's cube game, as the panel shows it.
 export type CubeState = {
@@ -49,6 +63,7 @@ export type RoomOptions = {
 	// An object's mini-game has opened (or closed, with null).
 	onFocus: (thing: Thing | null) => void;
 	onCube: (state: CubeState) => void;
+	onRadio: (state: RadioState) => void;
 };
 
 export type Room = {
@@ -60,6 +75,11 @@ export type Room = {
 	setLantern: (color: string, level: number) => void;
 	scrambleCube: () => void;
 	solveCube: () => void;
+	setRadioOn: (on: boolean) => void;
+	// Tune straight to a frequency (while dragging the dial), or sweep across to it.
+	tuneRadio: (freq: number) => void;
+	sweepRadio: (freq: number) => void;
+	setRadioVolume: (volume: number) => void;
 	setMuted: (muted: boolean) => void;
 	dispose: () => void;
 };
@@ -74,6 +94,19 @@ const LANTERN_BAKED = new THREE.Color(1.0, 0.62, 0.3);
 const QUARTER = Math.PI / 2;
 // The cube's turns since it was last solved, so it stays as the visitor left it.
 const CUBE_KEY = 'cube-moves';
+// The radio's frequency and volume, so it's tuned where it was left.
+const RADIO_KEY = 'radio';
+// Where the numbers sit on the clock radio's printed FM scale (MHz, millimetres along the clock), so
+// the pointer lines up with them; the red pointer line is modelled at 70 mm.
+const FM_SCALE: [number, number][] = [
+	[88, 48.16],
+	[92, 52.1],
+	[96, 56.08],
+	[100, 60.74],
+	[104, 66.05],
+	[108, 71.3]
+];
+const POINTER_AT = 70;
 
 // Both look down at the tabletop from close by; phones use a wider lens to fit all of it in.
 export function startView(aspect: number) {
@@ -94,7 +127,7 @@ export function startView(aspect: number) {
 }
 
 export async function createRoom(options: RoomOptions): Promise<Room> {
-	const { canvas, layer, background, onProgress, onMode, onFocus, onCube } = options;
+	const { canvas, layer, background, onProgress, onMode, onFocus, onCube, onRadio } = options;
 
 	const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 	renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -205,6 +238,10 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	const cartRest = cart.position.clone();
 	const yaw = Math.atan2(CAMERA_NEAR.x - FLOAT.x, CAMERA_NEAR.z - FLOAT.z);
 	let ledMaterial: THREE.MeshStandardMaterial | undefined;
+	let dialPointer: THREE.Object3D | undefined;
+	// The dial's printing and pointer, which light up while the radio's on.
+	const dialParts: THREE.Mesh[] = [];
+	const dialMaterials = new Map<THREE.Mesh, { off: THREE.Material; on: THREE.Material }>();
 	const paperMaterials: THREE.MeshBasicMaterial[] = [];
 	const live: THREE.MeshStandardMaterial[] = [];
 
@@ -214,6 +251,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		// glTF splits multi-material objects into child meshes, so the tag can sit on the parent.
 		const group = object.userData.lightmap ?? object.parent?.userData.lightmap;
 		const name = object.material.name as string;
+		if (name === 'ClockPointer') dialPointer = object;
+		if (name === 'ClockPrint' || name === 'ClockPointer') dialParts.push(object);
 		if (group && /glass/i.test(name)) {
 			// Glass can't be baked (light passes through it), so it's drawn as a faint clear layer.
 			object.material = new THREE.MeshBasicMaterial({
@@ -332,6 +371,41 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		cubeHistory = [];
 	}
 	for (const move of cubeHistory) rubiks.apply(move);
+	// The clock radio: the pointer slides along the dial, the tuning wheel turns, and the first
+	// slide switch is the power.
+	const radio = { on: false, freq: STATIONS[0].freq, volume: 0.7 };
+	try {
+		const saved = JSON.parse(localStorage.getItem(RADIO_KEY) ?? 'null');
+		if (typeof saved?.freq === 'number')
+			radio.freq = THREE.MathUtils.clamp(saved.freq, FM_MIN, FM_MAX);
+		if (typeof saved?.volume === 'number') radio.volume = THREE.MathUtils.clamp(saved.volume, 0, 1);
+	} catch {
+		// Nothing saved, or unreadable: the radio starts on the first station.
+	}
+	for (const mesh of dialParts)
+		dialMaterials.set(mesh, {
+			off: mesh.material as THREE.Material,
+			on: new THREE.MeshBasicMaterial({
+				color: mesh === dialPointer ? '#ff3a22' : '#ffe6bd',
+				polygonOffset: true,
+				polygonOffsetFactor: -1
+			})
+		});
+	const radioSwitch = { value: 0 };
+	// The display shows the frequency for a moment after it's tuned.
+	let showFrequencyUntil = 0;
+	const wheel = gltf.scene.getObjectByName('ClockWheel')!;
+	const wheelRest = wheel.quaternion.clone();
+	const wheelTurn = new THREE.Quaternion();
+	const powerSwitch = gltf.scene.getObjectByName('ClockSwitch0')!;
+	const switchRest = powerSwitch.position.clone();
+	const switchSlide = new THREE.Vector3(0, 0, -0.08).applyQuaternion(powerSwitch.quaternion);
+	// Millimetres in scene units, from the display (86 mm wide).
+	const displayMesh = gltf.scene.getObjectByName('ClockDisplay') as THREE.Mesh;
+	displayMesh.geometry.computeBoundingBox();
+	const MM =
+		(displayMesh.geometry.boundingBox!.max.x - displayMesh.geometry.boundingBox!.min.x) / 86;
+
 	const cube: CubeState = {
 		scrambled: !rubiks.isSolved(),
 		solved: false,
@@ -523,6 +597,12 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			cubeLift.value * Math.sin(t * 1.6) * cubeSize * 0.04 +
 			Math.sin(Math.PI * cubeJoy.value) * cubeSize * 0.6;
 		rubiks.root.rotation.y = cubeYaw + cubeJoy.value * Math.PI * 2;
+		if (dialPointer) dialPointer.position.x = (dialAt(radio.freq) - POINTER_AT) * MM;
+		wheel.quaternion
+			.copy(wheelRest)
+			.multiply(wheelTurn.setFromAxisAngle(Y_AXIS, (radio.freq - FM_MIN) * 0.8));
+		powerSwitch.position.x = switchRest.x + switchSlide.x * radioSwitch.value;
+		powerSwitch.position.z = switchRest.z + switchSlide.z * radioSwitch.value;
 		lid.rotation.x = -s.open * OPEN;
 		cart.position.copy(cartRest);
 		cart.position.z += s.cartOut * 0.45;
@@ -593,7 +673,9 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	const FOCUS_FROM: Partial<Record<Thing, THREE.Vector3>> = {
 		lantern: new THREE.Vector3(-0.62, 0.22, 0.75),
 		// From a little above, so the top face shows too.
-		cube: CUBE_FROM
+		cube: CUBE_FROM,
+		// From the front and a little right, square on to the dial.
+		clock: new THREE.Vector3(0.2, 0.32, 1)
 	};
 
 	function viewOf(thing: Thing) {
@@ -612,12 +694,18 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		}
 		const dir = (FOCUS_FROM[thing] ?? new THREE.Vector3(0.12, 0.22, 1)).clone().normalize();
 		// The cube is small: further back, so there's room to turn it over.
+		// The cube is small, so further back to leave room to turn it over; the clock radio is wide, so
+		// closer in, to read its dial.
 		const distance =
-			thing === 'cube' ? (camera.aspect > 1 ? 2.75 : 2.15) : camera.aspect > 1 ? 2.1 : 1.85;
+			{
+				cube: camera.aspect > 1 ? 2.75 : 2.15,
+				clock: camera.aspect > 1 ? 1.6 : 1.65
+			}[thing as string] ?? (camera.aspect > 1 ? 2.1 : 1.85);
 		const eye = centre.clone().addScaledVector(dir, size * distance);
 		// Aim a little right of the object, so it sits left of centre with the panel beside it.
 		const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), dir).normalize();
-		const target = centre.clone().addScaledVector(right, size * (camera.aspect > 1 ? 0.22 : 0));
+		const aside = thing === 'clock' ? 0.33 : 0.22;
+		const target = centre.clone().addScaledVector(right, size * (camera.aspect > 1 ? aside : 0));
 		if (camera.aspect <= 1) target.y -= size * 0.42;
 		return { eye, target };
 	}
@@ -675,10 +763,13 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			camera.lookAt(look);
 		}
 
-		const tick = Math.floor(Date.now() / 500);
+		// The visitor's time, or the frequency just after the radio is tuned.
+		const tuning = radio.on && performance.now() < showFrequencyUntil;
+		const tick = tuning ? -1 - Math.round(radio.freq * 10) : Math.floor(Date.now() / 500);
 		if (tick !== clockTick) {
 			clockTick = tick;
-			drawClockLED(clockCtx, new Date());
+			if (tuning) drawFrequencyLED(clockCtx, radio.freq);
+			else drawClockLED(clockCtx, new Date());
 			clockTexture.needsUpdate = true;
 		}
 
@@ -803,7 +894,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		if (mode !== 'room' || focused) return;
 		const thing = thingAt(event);
 		if (thing === 'sp') return enterSite();
-		if (thing === 'lantern' || thing === 'cube') return focus(thing);
+		if (thing === 'lantern' || thing === 'cube' || thing === 'clock') return focus(thing);
 		// Not playable yet: a little hop says so.
 		if (thing)
 			gsap
@@ -1035,6 +1126,69 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		});
 	}
 
+	// The radio only plays in the room, not behind the page.
+	function applyRadio() {
+		for (const [mesh, materials] of dialMaterials)
+			mesh.material = radio.on ? materials.on : materials.off;
+		sound.radio.set({
+			on: radio.on && (mode === 'room' || mode === 'returning'),
+			freq: radio.freq,
+			volume: radio.volume
+		});
+		onRadio({
+			...radio,
+			station: stationAt(radio.freq)?.name ?? null,
+			stations: STATIONS,
+			band: [FM_MIN, FM_MAX]
+		});
+	}
+
+	function saveRadio() {
+		try {
+			localStorage.setItem(RADIO_KEY, JSON.stringify({ freq: radio.freq, volume: radio.volume }));
+		} catch {
+			// The radio just won't remember where it was.
+		}
+	}
+
+	function tuneRadio(freq: number) {
+		gsap.killTweensOf(radio);
+		radio.freq = THREE.MathUtils.clamp(freq, FM_MIN, FM_MAX);
+		showFrequencyUntil = performance.now() + 2500;
+		applyRadio();
+		saveRadio();
+	}
+
+	// Sweeps the dial across to a station, through whatever's in between.
+	function sweepRadio(freq: number) {
+		gsap.to(radio, {
+			freq: THREE.MathUtils.clamp(freq, FM_MIN, FM_MAX),
+			duration: 0.3 + Math.abs(freq - radio.freq) * 0.05,
+			ease: 'power2.inOut',
+			overwrite: true,
+			onUpdate: () => {
+				showFrequencyUntil = performance.now() + 2500;
+				applyRadio();
+			},
+			onComplete: saveRadio
+		});
+	}
+
+	function setRadioOn(on: boolean) {
+		void sound.resume();
+		radio.on = on;
+		sound.click();
+		gsap.to(radioSwitch, { value: on ? 1 : 0, duration: 0.25, ease: 'back.out(2)' });
+		if (on) showFrequencyUntil = performance.now() + 2500;
+		applyRadio();
+	}
+
+	function setRadioVolume(volume: number) {
+		radio.volume = THREE.MathUtils.clamp(volume, 0, 1);
+		applyRadio();
+		saveRadio();
+	}
+
 	// The tweens record their start values when the timeline is built, so it's always built from the
 	// resting pose (the SP closed on the table).
 	const RESTING = { ...s };
@@ -1074,6 +1228,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	function setMode(next: RoomMode) {
 		mode = next;
 		updateLoop();
+		applyRadio();
 		if (import.meta.env.DEV)
 			Object.assign(window, { __boot: { s, timeline, scene, mode, camera, THREE } });
 		onMode(next);
@@ -1192,6 +1347,10 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		setLantern,
 		scrambleCube: () => void scrambleCube(),
 		solveCube: () => void solveCube(),
+		setRadioOn,
+		tuneRadio,
+		sweepRadio,
+		setRadioVolume,
 		setMuted: (muted) => sound.setMuted(muted),
 		dispose
 	};
@@ -1201,4 +1360,14 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 function dominantAxis(v: THREE.Vector3) {
 	const a = [Math.abs(v.x), Math.abs(v.y), Math.abs(v.z)];
 	return a[0] >= a[1] && a[0] >= a[2] ? 0 : a[1] >= a[2] ? 1 : 2;
+}
+
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+
+// Where a frequency sits along the clock radio's dial, in millimetres.
+function dialAt(freq: number) {
+	let i = 0;
+	while (i < FM_SCALE.length - 2 && freq > FM_SCALE[i + 1][0]) i++;
+	const [[f0, x0], [f1, x1]] = [FM_SCALE[i], FM_SCALE[i + 1]];
+	return x0 + ((freq - f0) / (f1 - f0)) * (x1 - x0);
 }

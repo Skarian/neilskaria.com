@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { CubeState, Room, RoomMode, Thing } from './engine';
+	import type { CubeState, RadioState, Room, RoomMode, Thing } from './engine';
 	import { room } from './room.svelte';
 
 	// Panels pop in like a game dialog: from small and tilted, overshooting a touch.
@@ -65,6 +65,18 @@
 	// The Rubik's cube's state, from the room.
 	let cube = $state<CubeState>({ scrambled: false, solved: false, busy: false });
 
+	// The clock radio's state, from the room.
+	let radio = $state<RadioState>({
+		on: false,
+		freq: 88.5,
+		volume: 0.7,
+		station: null,
+		stations: [],
+		band: [87.5, 108]
+	});
+	// Where a frequency sits along the panel's dial, as a percentage.
+	const dialAt = (freq: number) => ((freq - radio.band[0]) / (radio.band[1] - radio.band[0])) * 100;
+
 	// Confetti for a solve: scattered pieces in the cube's colours.
 	const CONFETTI = Array.from({ length: 28 }, (_, i) => ({
 		x: Math.round(Math.sin(i * 2.4) * 190),
@@ -96,7 +108,8 @@
 			onProgress: (value) => (progress = value),
 			onMode,
 			onFocus: (thing) => (focused = thing),
-			onCube: (state) => (cube = state)
+			onCube: (state) => (cube = state),
+			onRadio: (state) => (radio = state)
 		});
 		engine.setLantern(lanternColor, lanternLevel);
 	}
@@ -305,6 +318,87 @@
 					{/each}
 				</div>
 			{/if}
+		</aside>
+	{/if}
+
+	{#if focused === 'clock'}
+		<aside
+			class="panel radio-panel"
+			aria-label="Clock radio"
+			in:pop={{ delay: 350 }}
+			out:pop={{ duration: 220 }}
+		>
+			<p class="ribbon radio-ribbon">RADIO</p>
+			<h2>{radio.on ? (radio.station ?? 'Static…') : 'Radio off'}</h2>
+			<div class="dial" style:--at="{dialAt(radio.freq)}%">
+				<div class="scale" aria-hidden="true">
+					{#each [88, 92, 96, 100, 104, 108] as mhz (mhz)}
+						<span style:left="{dialAt(mhz)}%">{mhz}</span>
+					{/each}
+					{#each radio.stations as station (station.freq)}
+						<i style:left="{dialAt(station.freq)}%"></i>
+					{/each}
+				</div>
+				<input
+					type="range"
+					min={radio.band[0]}
+					max={radio.band[1]}
+					step="0.1"
+					value={radio.freq}
+					oninput={(event) => engine?.tuneRadio(Number(event.currentTarget.value))}
+					aria-label="Tuning"
+					aria-valuetext="{radio.freq.toFixed(1)} FM"
+				/>
+			</div>
+			<p class="freq" class:on={radio.on}>{radio.freq.toFixed(1)} <small>FM</small></p>
+			<div class="presets" role="group" aria-label="Stations">
+				{#each radio.stations as station, i (station.freq)}
+					<button
+						aria-label={station.name}
+						title={station.name}
+						aria-pressed={radio.station === station.name}
+						style:--i={i}
+						onclick={() => {
+							engine?.sweepRadio(station.freq);
+							if (!radio.on) engine?.setRadioOn(true);
+						}}>{i + 1}</button
+					>
+				{/each}
+			</div>
+			<label class="slider">
+				<svg class="end icon" viewBox="0 0 24 24" aria-hidden="true"
+					><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor" /></svg
+				>
+				<input
+					type="range"
+					min="0"
+					max="1"
+					step="0.01"
+					value={radio.volume}
+					oninput={(event) => engine?.setRadioVolume(Number(event.currentTarget.value))}
+					aria-label="Volume"
+					style:--fill="{radio.volume * 100}%"
+				/>
+				<svg class="end icon" viewBox="0 0 24 24" aria-hidden="true"
+					><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor" /><path
+						d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+					/></svg
+				>
+			</label>
+			<div class="actions">
+				<button class="back" onclick={() => engine?.unfocus()}>◀ BACK</button>
+				<button
+					class="back power"
+					class:on={radio.on}
+					aria-pressed={radio.on}
+					onclick={() => engine?.setRadioOn(!radio.on)}
+					><span class="led"></span>{radio.on ? 'OFF' : 'ON'}</button
+				>
+			</div>
 		</aside>
 	{/if}
 
@@ -582,6 +676,187 @@
 		cursor: pointer;
 	}
 
+	.radio-ribbon {
+		background: #e2574c;
+	}
+
+	/* The tuning dial, like the clock radio's own: a dark strip with a printed scale, little marks
+	   where the stations are, and a red pointer to drag. */
+	.dial {
+		position: relative;
+		width: 100%;
+		height: 3rem;
+		border: 3px solid var(--ink);
+		border-radius: 12px;
+		background: linear-gradient(180deg, #2a2320, #1a1513);
+		box-shadow: inset 0 3px 6px rgb(0 0 0 / 0.5);
+	}
+
+	.scale {
+		position: absolute;
+		inset: 0 0.9rem;
+		pointer-events: none;
+	}
+
+	.scale span {
+		position: absolute;
+		top: 0.35rem;
+		translate: -50% 0;
+		font-size: 0.6rem;
+		letter-spacing: 0.05em;
+		color: #e9dcc6;
+	}
+
+	.scale span::after {
+		content: '';
+		position: absolute;
+		left: 50%;
+		top: 1rem;
+		width: 1px;
+		height: 0.45rem;
+		background: #e9dcc6;
+	}
+
+	.scale i {
+		position: absolute;
+		bottom: 0.35rem;
+		width: 0.4rem;
+		height: 0.4rem;
+		translate: -50% 0;
+		border-radius: 50%;
+		background: #ffb070;
+	}
+
+	.dial input {
+		position: absolute;
+		inset: 0 calc(0.9rem - 0.7rem);
+		width: calc(100% - 2 * (0.9rem - 0.7rem));
+		height: 100%;
+		appearance: none;
+		background: none;
+		cursor: ew-resize;
+	}
+
+	/* The pointer: a thin red line the full height of the dial, with a wide invisible grip. */
+	.dial input::-webkit-slider-thumb {
+		appearance: none;
+		width: 1.4rem;
+		height: 2.9rem;
+		background: linear-gradient(
+			90deg,
+			transparent calc(50% - 1.5px),
+			#ff3b2a 0 calc(50% + 1.5px),
+			transparent 0
+		);
+		filter: drop-shadow(0 0 3px rgb(255 60 40 / 0.8));
+	}
+
+	.dial input::-moz-range-thumb {
+		width: 1.4rem;
+		height: 2.9rem;
+		border: 0;
+		border-radius: 0;
+		background: linear-gradient(
+			90deg,
+			transparent calc(50% - 1.5px),
+			#ff3b2a 0 calc(50% + 1.5px),
+			transparent 0
+		);
+	}
+
+	.freq {
+		margin-top: -0.2rem;
+		padding: 0.2rem 0.8rem;
+		border-radius: 8px;
+		background: #1a0605;
+		font-family: ui-monospace, monospace;
+		font-size: 1rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		color: #5a1a14;
+		transition:
+			color 0.2s,
+			text-shadow 0.2s;
+	}
+
+	.freq.on {
+		color: #ff3b2a;
+		text-shadow: 0 0 8px rgb(255 59 42 / 0.7);
+	}
+
+	.freq small {
+		font-size: 0.65rem;
+	}
+
+	/* Preset buttons, chunky like a car radio's. */
+	.presets {
+		display: flex;
+		gap: 0.6rem;
+	}
+
+	.presets button {
+		width: 2.6rem;
+		height: 2.3rem;
+		border: 3px solid var(--ink);
+		border-radius: 10px;
+		background: #fffaf0;
+		color: var(--ink);
+		font-family: 'Arial Black', 'Helvetica Neue', Arial, sans-serif;
+		font-size: 0.95rem;
+		cursor: pointer;
+		box-shadow: 0 4px 0 var(--ink);
+		animation: gem-in 0.45s calc(0.5s + var(--i) * 0.05s) both cubic-bezier(0.3, 1.6, 0.5, 1);
+		transition:
+			translate 0.08s,
+			box-shadow 0.08s,
+			background 0.15s;
+	}
+
+	.presets button:hover {
+		translate: 0 -2px;
+		box-shadow: 0 6px 0 var(--ink);
+	}
+
+	.presets button:active,
+	.presets button[aria-pressed='true'] {
+		translate: 0 3px;
+		box-shadow: 0 1px 0 var(--ink);
+	}
+
+	.presets button[aria-pressed='true'] {
+		background: #ffb070;
+	}
+
+	.power {
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+	}
+
+	.power.on {
+		background: #e2574c;
+	}
+
+	/* A little power light: dark when off, glowing green when on. */
+	.led {
+		width: 0.55rem;
+		height: 0.55rem;
+		border: 2px solid var(--ink);
+		border-radius: 50%;
+		background: #2c2a30;
+	}
+
+	.power.on .led {
+		background: #6dff8a;
+		box-shadow: 0 0 6px #6dff8a;
+	}
+
+	.icon {
+		width: 1.2rem;
+		height: 1.2rem;
+		flex: none;
+	}
+
 	.cube-ribbon {
 		background: #4f8fe8;
 	}
@@ -764,6 +1039,7 @@
 		.gem,
 		.swatches button[aria-checked='true']::after,
 		.panel h2.cheer,
+		.presets button,
 		.confetti {
 			animation: none;
 		}

@@ -58,6 +58,26 @@ export function drawClockLED(ctx: CanvasRenderingContext2D, now: Date) {
 	ctx.restore();
 }
 
+// While the radio is being tuned, the display shows the frequency instead, like " 98.1".
+export function drawFrequencyLED(ctx: CanvasRenderingContext2D, freq: number) {
+	const { width: w, height: h } = ctx.canvas;
+	ctx.fillStyle = BACK;
+	ctx.fillRect(0, 0, w, h);
+	const text = (Math.round(freq * 10) / 10).toFixed(1).padStart(5, ' ');
+	const size = { w: w * 0.15, h: h * 0.7, t: h * 0.1 };
+	const top = h * 0.15;
+	ctx.save();
+	ctx.shadowColor = LIT;
+	ctx.shadowBlur = h * 0.08;
+	digit(ctx, w * 0.1, top, size, text[0]);
+	digit(ctx, w * 0.29, top, size, text[1]);
+	digit(ctx, w * 0.48, top, size, text[2]);
+	ctx.fillStyle = LIT;
+	ctx.fillRect(w * 0.665, top + size.h - size.t / 2, size.t, size.t);
+	digit(ctx, w * 0.74, top, size, text[4]);
+	ctx.restore();
+}
+
 function digit(
 	ctx: CanvasRenderingContext2D,
 	x: number,
