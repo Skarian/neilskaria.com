@@ -307,6 +307,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 
 	const raycaster = new THREE.Raycaster();
 	addEventListener('resize', resize);
+	document.addEventListener('visibilitychange', updateLoop);
 	canvas.addEventListener('pointermove', pointermove);
 	canvas.addEventListener('pointerleave', pointerleave);
 	canvas.addEventListener('click', click);
@@ -574,10 +575,14 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		return tl;
 	}
 
+	// Rendering runs only while the room is on screen: not behind the page, not in a hidden tab.
+	function updateLoop() {
+		renderer.setAnimationLoop(mode === 'site' || document.hidden ? null : render);
+	}
+
 	function setMode(next: RoomMode) {
 		mode = next;
-		if (next === 'site') renderer.setAnimationLoop(null);
-		else renderer.setAnimationLoop(render);
+		updateLoop();
 		if (import.meta.env.DEV) Object.assign(window, { __boot: { s, timeline, scene, mode } });
 		onMode(next);
 	}
@@ -660,6 +665,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		disposed = true;
 		timeline?.kill();
 		removeEventListener('resize', resize);
+		document.removeEventListener('visibilitychange', updateLoop);
 		canvas.removeEventListener('pointermove', pointermove);
 		canvas.removeEventListener('pointerleave', pointerleave);
 		canvas.removeEventListener('click', click);

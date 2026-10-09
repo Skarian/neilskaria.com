@@ -24,10 +24,12 @@
 
 	const SEEN_KEY = 'boot-seen';
 	const MUTED_KEY = 'boot-muted';
-	// Runs before the page is painted, so a first visit shows the loading screen straight away and a
-	// returning visit never flashes it.
+	// Where the visitor is in this tab ('room' or 'page'), so a reload puts them back there.
+	const PLACE_KEY = 'room-place';
+	// Runs before the page is painted, so the room's loading screen shows straight away (on a first
+	// visit, or reloading while in the room) and a returning visit never flashes it.
 	const headScript =
-		`<script>try{if(localStorage.getItem('${SEEN_KEY}')!=='1'&&!matchMedia('(prefers-reduced-motion: reduce)').matches)document.documentElement.dataset.intro='play'}catch(e){}</scr` +
+		`<script>try{if((localStorage.getItem('${SEEN_KEY}')!=='1'||sessionStorage.getItem('${PLACE_KEY}')==='room')&&!matchMedia('(prefers-reduced-motion: reduce)').matches)document.documentElement.dataset.intro='play'}catch(e){}</scr` +
 		'ipt>'; // split so this file's own script tag doesn't end here
 
 	type NetworkInformation = { saveData?: boolean; effectiveType?: string };
@@ -88,6 +90,8 @@
 	}
 
 	function onMode(mode: RoomMode) {
+		if (mode === 'room' || mode === 'site')
+			sessionStorage.setItem(PLACE_KEY, mode === 'room' ? 'room' : 'page');
 		if (mode === 'room') phase = 'room';
 		else if (mode === 'site') {
 			phase = 'page';
@@ -139,7 +143,9 @@
 	onMount(() => {
 		muted = localStorage.getItem(MUTED_KEY) === '1';
 		const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-		const firstVisit = localStorage.getItem(SEEN_KEY) !== '1' && !reduced;
+		// A first visit, or a reload while in the room, starts in the room.
+		const inRoom = sessionStorage.getItem(PLACE_KEY) === 'room';
+		const firstVisit = (localStorage.getItem(SEEN_KEY) !== '1' || inRoom) && !reduced;
 
 		if (firstVisit) {
 			show();
