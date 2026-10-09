@@ -366,8 +366,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	const bonsai = createBonsai(gltf.scene, { value: new THREE.Texture() });
 	bonsai.load();
 	live.push(...bonsai.materials);
-	const TURN_KEY = 'bonsai-turn';
-	bonsai.turntable.rotation.y = Number(localStorage.getItem(TURN_KEY)) || 0;
 	// Cut clumps fall onto the slate (or the table) and shrink away; water drops fall through the tree.
 	const slate = gltf.scene.getObjectByName('BonsaiSlate')!;
 	const slateBox = new THREE.Box3().setFromObject(slate);
@@ -383,9 +381,11 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	nightstandTop.min.y = slateBox.min.y;
 	// The parts of the tree that turn it: the pot, its feet and soil, and the slate under it.
 	const potParts: THREE.Object3D[] = [];
+	const treeParts: THREE.Object3D[] = [];
 	gltf.scene.traverse((o) => {
 		if (o instanceof THREE.Mesh && /^Bonsai(Pot|Foot|Soil|Moss|Slate)/.test(o.name))
 			potParts.push(o);
+		else if (o instanceof THREE.Mesh && /^Bonsai(Wood|Twigs)/.test(o.name)) treeParts.push(o);
 	});
 	const BITS = 120;
 	const bits = new THREE.InstancedMesh(
@@ -556,8 +556,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	};
 	pose(0);
 	// The bonsai's shapes are made with the tree turned to the front, and turn with it.
-	const turnedTo = bonsai.turntable.rotation.y;
-	bonsai.turntable.rotation.y = 0;
+	// (The tree always starts, and is put back, facing the front.)
 	gltf.scene.updateMatrixWorld(true);
 	const turntableRest = bonsai.turntable.matrixWorld.clone().invert();
 	for (const thing of Object.keys(hover) as Thing[]) {
@@ -584,8 +583,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		}
 	}
 	// Back to where the visitor left the tree turned.
-	bonsai.turntable.rotation.y = turnedTo;
-	turnTree(0);
 
 	// A soft contact shadow under the console while it rests on the nightstand.
 	const contact = new THREE.Mesh(
@@ -1081,8 +1078,9 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	function pointerdown(event: PointerEvent) {
 		if (focused === 'bonsai' && mode === 'room') {
 			canvas.setPointerCapture(event.pointerId);
-			// On the pot (or the slate), a drag turns the tree; anywhere else it slashes.
-			if (onPot(event)) {
+			// Like the cube: a drag starting on the tree (or just off its foliage) slashes; a drag
+			// anywhere around it, or on the pot, turns it.
+			if (onPot(event) || !nearTree(event)) {
 				turning = { x: event.clientX };
 				spin = 0;
 			} else {
@@ -1299,6 +1297,24 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		return { x: ((onScreen.x + 1) / 2) * innerWidth, y: ((1 - onScreen.y) / 2) * innerHeight };
 	}
 
+	// On the tree's branches or foliage, or within a finger's width of its foliage.
+	function nearTree(event: PointerEvent) {
+		raycaster.setFromCamera(ndcOf(event), camera);
+		if (raycaster.intersectObjects(treeParts, false).length) return true;
+		bonsai.turntable.updateMatrixWorld();
+		const matrix = bonsai.turntable.matrixWorld;
+		const margin = matchMedia('(pointer: coarse)').matches ? 44 : 32;
+		for (let s = 0; s < bonsai.count; s++) {
+			const reach = Math.ceil(bonsai.lengths[s]);
+			const nodes = bonsai.shoots[s].nodes;
+			for (let k = 0; k < reach; k += 2) {
+				const p = screenOf(nodes[Math.min(k, nodes.length - 1)], matrix);
+				if (Math.hypot(p.x - event.clientX, p.y - event.clientY) < margin) return true;
+			}
+		}
+		return false;
+	}
+
 	function onPot(event: PointerEvent) {
 		raycaster.setFromCamera(ndcOf(event), camera);
 		return raycaster.intersectObjects(potParts, false).length > 0;
@@ -1313,7 +1329,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		);
 		for (const picker of pickers)
 			if (picker.userData.thing === 'bonsai') picker.matrixWorld.copy(turned);
-		localStorage.setItem(TURN_KEY, String(bonsai.turntable.rotation.y % (Math.PI * 2)));
 	}
 
 	// Where (0-1 along it) segment p0-p1 crosses segment q0-q1, if it does.
@@ -1410,7 +1425,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			trailPoints.push({ ...to, at: performance.now() });
 			return;
 		}
-		if (event.pointerType === 'mouse') canvas.style.cursor = onPot(event) ? 'grab' : SCISSORS;
+		if (event.pointerType === 'mouse')
+			canvas.style.cursor = onPot(event) || !nearTree(event) ? 'grab' : SCISSORS;
 	}
 
 	// The trail: a bright stroke that thins and fades from its tail.
@@ -1561,6 +1577,17 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	function leaveTree() {
 		slash = turning = null;
 		spin = 0;
+		// Turned back to face the front, the short way round.
+		const now = bonsai.turntable.rotation.y;
+		const front = Math.round(now / (Math.PI * 2)) * Math.PI * 2;
+		const turn = { y: now };
+		gsap.to(turn, {
+			y: front,
+			duration: 0.9,
+			ease: 'power2.inOut',
+			onUpdate: () => turnTree(turn.y - bonsai.turntable.rotation.y),
+			onComplete: () => turnTree(-bonsai.turntable.rotation.y)
+		});
 		if (bonsaiDirty) bonsai.save();
 		bonsaiDirty = false;
 		canvas.style.cursor = '';
