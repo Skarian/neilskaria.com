@@ -114,9 +114,21 @@
 			onProgress: (value) => (progress = value),
 			onMode,
 			onFocus: (thing) => {
+				// Picking up the clock radio switches it on (still inside the click, so sound can play);
+				// putting it down while it's only playing static switches it off.
+				if (thing === 'clock' && !radio.on) {
+					// Left between stations last time: find the nearest one, rather than start on static.
+					if (!player.station())
+						player.sweep(
+							STATIONS.reduce((a, b) =>
+								Math.abs(b.freq - radio.freq) < Math.abs(a.freq - radio.freq) ? b : a
+							).freq
+						);
+					player.setOn(true);
+				}
+				if (focused === 'clock' && thing !== 'clock' && radio.on && !player.station())
+					player.setOn(false);
 				focused = thing;
-				// Picking up the clock radio switches it on (still inside the click, so sound can play).
-				if (thing === 'clock' && !radio.on) player.setOn(true);
 			},
 			onCube: (state) => (cube = state),
 			// The music dips a little under the boot chime.
@@ -1045,6 +1057,7 @@
 
 	.back {
 		margin-top: 0.3rem;
+		white-space: nowrap;
 		padding: 0.5rem 1.3rem;
 		border: 3px solid var(--ink);
 		border-radius: 999px;

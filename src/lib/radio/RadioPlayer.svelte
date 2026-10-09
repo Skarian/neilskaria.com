@@ -46,6 +46,9 @@
 	.radio {
 		display: flex;
 		align-items: center;
+		/* Never wider than the page: the readout gives way (and truncates the name) instead. */
+		min-width: 0;
+		max-width: 100%;
 		gap: 0.5rem;
 		font-family: ui-monospace, monospace;
 		font-size: 0.7rem;
@@ -174,8 +177,13 @@
 	}
 
 	@media (max-width: 520px) {
+		.radio {
+			width: 100%;
+		}
+
 		.readout {
 			min-width: 0;
+			width: 0;
 			flex: 1;
 		}
 
