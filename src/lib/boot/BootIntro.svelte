@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { Hover, Room, RoomMode, Thing } from './engine';
+	import type { Room, RoomMode, Thing } from './engine';
 	import { room } from './room.svelte';
 
 	// Panels pop in like a game dialog: from small and tilted, overshooting a touch.
@@ -40,13 +40,12 @@
 	let progress = $state(0);
 	let muted = $state(false);
 	let pressed = $state(false);
-	let hover = $state<Hover>(null);
 	let focused = $state<Thing | null>(null);
 
 	// The lantern's presets: warm whites to colours. Brightness runs from off to a little over full.
 	const LANTERN_COLORS = [
-		{ name: 'Candle', css: '#ff9d4a' },
 		{ name: 'Paper white', css: '#ffe2bf' },
+		{ name: 'Candle', css: '#ff9d4a' },
 		{ name: 'Sakura', css: '#ff7fa6' },
 		{ name: 'Matcha', css: '#9be36f' },
 		{ name: 'Tide', css: '#5ec8e8' },
@@ -84,9 +83,9 @@
 			startIn,
 			onProgress: (value) => (progress = value),
 			onMode,
-			onHover: (value) => (hover = value),
 			onFocus: (thing) => (focused = thing)
 		});
+		engine.setLantern(lanternColor, lanternLevel);
 	}
 
 	function onMode(mode: RoomMode) {
@@ -95,7 +94,6 @@
 		if (mode === 'room') phase = 'room';
 		else if (mode === 'site') {
 			phase = 'page';
-			hover = null;
 			localStorage.setItem(SEEN_KEY, '1');
 			hide();
 			room.ready = true;
@@ -190,9 +188,9 @@
 
 	{#if phase === 'room' && !focused}
 		<div class="start">
-			<button class:pressed onclick={start} aria-label="Start: open the site" data-start
-				>START</button
-			>
+			<button class:pressed onclick={start} aria-label="Start: open the site" data-start>
+				{#each 'START' as letter, i (i)}<span style:--i={i}>{letter}</span>{/each}
+			</button>
 		</div>
 	{/if}
 
@@ -233,6 +231,7 @@
 				<span class="end" aria-hidden="true">☀</span>
 			</label>
 			<div class="actions">
+				<button class="back" onclick={() => engine?.unfocus()}>◀ BACK</button>
 				<button
 					class="back reset"
 					onclick={() => {
@@ -240,13 +239,8 @@
 						lanternLevel = 1;
 					}}>↺ RESET</button
 				>
-				<button class="back" onclick={() => engine?.unfocus()}>◀ BACK</button>
 			</div>
 		</aside>
-	{/if}
-
-	{#if hover && phase === 'room'}
-		<p class="label" style:left="{hover.x}px" style:top="{hover.y}px">{hover.label}</p>
 	{/if}
 
 	<div class="corner">
@@ -328,12 +322,62 @@
 			box-shadow 0.08s;
 	}
 
-	.start button:hover {
-		box-shadow:
-			0 5px 0 #17151b,
-			0 8px 18px rgb(0 0 0 / 0.5),
-			0 0 22px rgb(255 170 90 / 0.45),
-			inset 0 1px 0 rgb(255 255 255 / 0.22);
+	/* The letters ripple gently while waiting; on hover they hop in turn and cycle through the
+	   lantern's colours; pressing squashes them. */
+	.start span {
+		display: inline-block;
+		animation: wave 2.4s calc(var(--i) * 0.12s) ease-in-out infinite;
+	}
+
+	.start button:hover span {
+		animation:
+			hop 0.55s calc(var(--i) * 0.07s) cubic-bezier(0.3, 1.8, 0.5, 1) infinite alternate,
+			hue 1.6s calc(var(--i) * -0.25s) linear infinite;
+	}
+
+	.start button:active span,
+	.start button.pressed span {
+		animation: none;
+		scale: 1.15 0.75;
+		transition: scale 0.08s;
+	}
+
+	@keyframes wave {
+		0%,
+		60%,
+		100% {
+			translate: 0 0;
+		}
+		30% {
+			translate: 0 -2px;
+		}
+	}
+
+	@keyframes hop {
+		from {
+			translate: 0 0;
+		}
+		to {
+			translate: 0 -5px;
+		}
+	}
+
+	@keyframes hue {
+		0% {
+			color: #ffe2bf;
+		}
+		25% {
+			color: #ff7fa6;
+		}
+		50% {
+			color: #9be36f;
+		}
+		75% {
+			color: #5ec8e8;
+		}
+		100% {
+			color: #ffe2bf;
+		}
 	}
 
 	.start button:active,
@@ -349,7 +393,6 @@
 		outline: 2px solid #ffb070;
 		outline-offset: 5px;
 	}
-
 
 	/* Game-style dialog: a cream card with a thick outline and a hard drop shadow. */
 	.panel {
@@ -583,19 +626,6 @@
 		}
 	}
 
-	.label {
-		position: fixed;
-		translate: 14px 14px;
-		padding: 0.35rem 0.6rem;
-		border-radius: 6px;
-		font-size: 0.7rem;
-		letter-spacing: 0.06em;
-		white-space: nowrap;
-		pointer-events: none;
-		background: rgb(14 11 9 / 0.75);
-		box-shadow: 0 4px 14px rgb(0 0 0 / 0.35);
-	}
-
 	.corner {
 		position: absolute;
 		right: 1.25rem;
@@ -631,7 +661,9 @@
 
 	@media (prefers-reduced-motion: reduce) {
 		.loading,
-		.start {
+		.start,
+		.start span,
+		.start button:hover span {
 			animation: none;
 		}
 	}

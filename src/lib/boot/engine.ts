@@ -14,7 +14,6 @@ import { drawClockLED } from './clock-led';
 import { createBootSound } from './sound';
 
 export type RoomMode = 'room' | 'booting' | 'site' | 'returning';
-export type Hover = { label: string; x: number; y: number } | null;
 export type Thing = 'sp' | 'cube' | 'clock' | 'lantern' | 'bonsai';
 
 export type RoomOptions = {
@@ -28,7 +27,6 @@ export type RoomOptions = {
 	startIn: 'room' | 'site';
 	onProgress: (progress: number) => void;
 	onMode: (mode: RoomMode) => void;
-	onHover: (hover: Hover) => void;
 	// An object's mini-game has opened (or closed, with null).
 	onFocus: (thing: Thing | null) => void;
 };
@@ -42,14 +40,6 @@ export type Room = {
 	setLantern: (color: string, level: number) => void;
 	setMuted: (muted: boolean) => void;
 	dispose: () => void;
-};
-
-const LABELS: Record<Thing, string> = {
-	sp: 'Game Boy Advance SP · open the site',
-	cube: "Rubik's cube · coming soon",
-	clock: 'Clock radio · coming soon',
-	lantern: 'Kumiko lantern · change the light',
-	bonsai: 'Bonsai · coming soon'
 };
 
 const OPEN = THREE.MathUtils.degToRad(150);
@@ -79,7 +69,7 @@ export function startView(aspect: number) {
 }
 
 export async function createRoom(options: RoomOptions): Promise<Room> {
-	const { canvas, layer, background, onProgress, onMode, onHover, onFocus } = options;
+	const { canvas, layer, background, onProgress, onMode, onFocus } = options;
 
 	const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 	renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -132,7 +122,12 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		boot: -1,
 		dive: 0
 	};
-	const hover = { sp: 0 };
+	// How highlighted each object is (0-1): it floats up a little and gets a thin white outline.
+	const hover: Record<Thing, number> = { sp: 0, cube: 0, clock: 0, lantern: 0, bonsai: 0 };
+	// Which object the outline is drawn around, and how strongly.
+	const outline = { thing: null as Thing | null, opacity: 0 };
+	// Each object's meshes (except the console, which moves as one) and where they rest.
+	const floaters: { mesh: THREE.Object3D; thing: Thing; y: number }[] = [];
 	const lantern = { level: 1, color: new THREE.Color().copy(LANTERN_BAKED) };
 	const focusBlend = { value: 0 };
 	const focusView = { eye: new THREE.Vector3(), target: new THREE.Vector3() };
@@ -253,6 +248,71 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		if (object.material instanceof THREE.MeshStandardMaterial) live.push(object.material);
 	});
 	screen.material = screenMaterial;
+
+	// A thin white outline around whichever object is hovered, like a game's interact highlight. The
+	// hovered object is drawn alone into a mask (on layer 1), and a full-screen pass draws a soft line
+	// just outside the mask's edge, so the silhouette gets one clean outline whatever it's made of.
+	const meshes: [THREE.Mesh, Thing][] = [];
+	gltf.scene.traverse((object) => {
+		const thing = object instanceof THREE.Mesh ? thingOf(object) : null;
+		if (thing && !/ClockDigits/.test(object.name)) meshes.push([object as THREE.Mesh, thing]);
+	});
+	const mask = new THREE.WebGLRenderTarget(1, 1);
+	const maskMaterial = new THREE.MeshBasicMaterial({ color: '#ffffff' });
+	const outlinePass = new THREE.Mesh(
+		new THREE.PlaneGeometry(2, 2),
+		new THREE.ShaderMaterial({
+			uniforms: {
+				mask: { value: mask.texture },
+				texel: { value: new THREE.Vector2() },
+				opacity: { value: 0 }
+			},
+			vertexShader:
+				'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4( position.xy, 0.0, 1.0 ); }',
+			fragmentShader: `
+				uniform sampler2D mask; uniform vec2 texel; uniform float opacity; varying vec2 vUv;
+				void main() {
+					float inside = texture2D( mask, vUv ).r;
+					float near = 0.0;
+					for ( int i = 0; i < 12; i++ ) {
+						float a = float( i ) * 0.5236;
+						near = max( near, texture2D( mask, vUv + vec2( cos( a ), sin( a ) ) * texel * 2.5 ).r );
+					}
+					float edge = clamp( near - inside, 0.0, 1.0 );
+					gl_FragColor = vec4( 1.0, 0.98, 0.94, edge * opacity );
+				}`,
+			transparent: true,
+			depthTest: false,
+			depthWrite: false
+		})
+	);
+	outlinePass.frustumCulled = false;
+	const outlineScene = new THREE.Scene();
+	outlineScene.add(outlinePass);
+	const outlineCamera = new THREE.Camera();
+	function sizeMask() {
+		const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+		mask.setSize(size.x, size.y);
+		(outlinePass.material as THREE.ShaderMaterial).uniforms.texel.value.set(
+			renderer.getPixelRatio() / size.x,
+			renderer.getPixelRatio() / size.y
+		);
+	}
+	sizeMask();
+
+	for (const [mesh, thing] of meshes) {
+		// Top-level parts of each object float together (the console floats as a whole).
+		if (thing !== 'sp' && mesh.parent === gltf.scene)
+			floaters.push({ mesh, thing, y: mesh.position.y });
+		else if (
+			thing !== 'sp' &&
+			mesh.parent &&
+			mesh.parent.parent === gltf.scene &&
+			!floaters.some((f) => f.mesh === mesh.parent)
+		) {
+			floaters.push({ mesh: mesh.parent, thing, y: mesh.parent.position.y });
+		}
+	}
 	screen.geometry.computeBoundingBox();
 
 	// A soft contact shadow under the console while it rests on the nightstand.
@@ -342,12 +402,13 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 
 	function pose(t: number) {
 		sp.position.lerpVectors(rest, FLOAT, s.rise);
-		sp.position.y += s.bob * 0.05 * Math.sin(t * 2.2) - s.dip * 0.05 + hover.sp * 0.06;
+		sp.position.y += s.bob * 0.05 * Math.sin(t * 2.2) - s.dip * 0.05 + hover.sp * 0.09;
 		sp.rotation.set(
 			s.pitch * PITCH,
 			THREE.MathUtils.lerp(REST_YAW, Math.PI * 2 + yaw, s.spin),
-			hover.sp * 0.04
+			hover.sp * 0.03
 		);
+		for (const f of floaters) f.mesh.position.y = f.y + hover[f.thing] * 0.09;
 		lid.rotation.x = -s.open * OPEN;
 		cart.position.copy(cartRest);
 		cart.position.z += s.cartOut * 0.45;
@@ -502,10 +563,29 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			screenTexture.needsUpdate = true;
 		}
 		renderer.render(scene, camera);
+		if (outline.thing && outline.opacity > 0.001) {
+			const background = scene.background;
+			scene.background = null;
+			scene.overrideMaterial = maskMaterial;
+			camera.layers.set(1);
+			renderer.setRenderTarget(mask);
+			renderer.setClearColor(0x000000, 1);
+			renderer.clear();
+			renderer.render(scene, camera);
+			renderer.setRenderTarget(null);
+			camera.layers.set(0);
+			scene.overrideMaterial = null;
+			scene.background = background;
+			(outlinePass.material as THREE.ShaderMaterial).uniforms.opacity.value = outline.opacity;
+			renderer.autoClear = false;
+			renderer.render(outlineScene, outlineCamera);
+			renderer.autoClear = true;
+		}
 	}
 
 	function resize() {
 		renderer.setSize(innerWidth, innerHeight, false);
+		sizeMask();
 		camera.aspect = innerWidth / innerHeight;
 		camera.updateProjectionMatrix();
 		view = startView(camera.aspect);
@@ -544,8 +624,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			-((event.clientY - rect.top) / rect.height) * 2 + 1
 		);
 		if (mode !== 'room' || focused) return;
-		const thing = event.pointerType === 'mouse' ? thingAt(event) : null;
-		setHovered(thing, event);
+		setHovered(event.pointerType === 'mouse' ? thingAt(event) : null);
 	}
 
 	function pointerleave() {
@@ -553,13 +632,28 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		setHovered(null);
 	}
 
-	function setHovered(thing: Thing | null, event?: PointerEvent | MouseEvent) {
-		if (thing !== hovered) {
-			hovered = thing;
-			gsap.to(hover, { sp: thing === 'sp' ? 1 : 0, duration: 0.45, ease: 'back.out(2)' });
-			canvas.style.cursor = thing ? 'pointer' : '';
+	function setHovered(thing: Thing | null) {
+		if (thing === hovered) return;
+		hovered = thing;
+		for (const key of Object.keys(hover) as Thing[]) {
+			const on = key === thing;
+			gsap.to(hover, {
+				[key]: on ? 1 : 0,
+				duration: on ? 0.45 : 0.3,
+				ease: on ? 'back.out(2.2)' : 'power2.out',
+				overwrite: 'auto'
+			});
 		}
-		onHover(thing && event ? { label: LABELS[thing], x: event.clientX, y: event.clientY } : null);
+		if (thing) {
+			for (const [mesh, of] of meshes) {
+				if (of === thing) mesh.layers.enable(1);
+				else mesh.layers.disable(1);
+			}
+			outline.thing = thing;
+			if (outline.opacity > 0.5) outline.opacity = 0.5;
+		}
+		gsap.to(outline, { opacity: thing ? 0.9 : 0, duration: thing ? 0.25 : 0.2, overwrite: true });
+		canvas.style.cursor = thing ? 'pointer' : '';
 	}
 
 	function click(event: MouseEvent) {
@@ -567,8 +661,12 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		const thing = thingAt(event);
 		if (thing === 'sp') return enterSite();
 		if (thing === 'lantern') return focus('lantern');
-		// Touch has no hover, so a tap shows the label instead.
-		if (thing) onHover({ label: LABELS[thing], x: event.clientX, y: event.clientY });
+		// Not playable yet: a little hop says so.
+		if (thing)
+			gsap
+				.timeline()
+				.to(hover, { [thing]: 2.2, duration: 0.18, ease: 'power2.out' })
+				.to(hover, { [thing]: hovered === thing ? 1 : 0, duration: 0.5, ease: 'bounce.out' });
 	}
 
 	// The tweens record their start values when the timeline is built, so it's always built from the
@@ -610,7 +708,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	function setMode(next: RoomMode) {
 		mode = next;
 		updateLoop();
-		if (import.meta.env.DEV) Object.assign(window, { __boot: { s, timeline, scene, mode } });
+		if (import.meta.env.DEV)
+			Object.assign(window, { __boot: { s, timeline, scene, mode, camera, THREE } });
 		onMode(next);
 	}
 
@@ -705,6 +804,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			}
 		});
 		envMap.dispose();
+		mask.dispose();
 		screenTexture.dispose();
 		clockTexture.dispose();
 		renderer.dispose();
