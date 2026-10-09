@@ -535,7 +535,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	function timelineFor() {
 		Object.assign(s, RESTING);
 		const tl = gsap.timeline({ paused: true });
-		const forwards = () => !tl.reversed();
 		tl.to(s, { drift: 1, duration: 2.8, ease: 'power1.inOut' }, 0)
 			.to(s, { rise: 1, duration: 1.3, ease: 'back.out(1.6)' }, 0.3)
 			.to(s, { spin: 1, duration: 1.5, ease: 'power2.inOut' }, 0.3)
@@ -544,11 +543,11 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			.to(s, { cartOut: 1, duration: 0.5, ease: 'back.out(2)' }, 0.9)
 			.to(s, { bob: 1, duration: 0.6 }, 1.4)
 			.to(s, { cartOut: 0, duration: 0.35, ease: 'power3.in' }, 2.4)
-			.call(() => forwards() && sound.click(), [], 2.75)
+			.call(() => sound.click(), [], 2.75)
 			.to(s, { dip: 1, duration: 0.08, yoyo: true, repeat: 1 }, 2.75)
-			.call(() => power(forwards()), [], 2.8)
+			.call(() => power(true), [], 2.8)
 			.fromTo(s, { boot: 0 }, { boot: BOOT_DURATION, duration: BOOT_DURATION, ease: 'none' }, 2.8)
-			.call(() => forwards() && sound.chime(), [], 2.8)
+			.call(() => sound.chime(), [], 2.8)
 			.to(s, { bob: 0, duration: 1.4 }, 3.3)
 			// A slow push while the logo plays, then one glide into the screen that slows to a stop
 			// as the screen fills, so there's no jolt when the page takes over.
@@ -590,29 +589,50 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		setMode('site');
 	}
 
+	// Going back is its own, shorter animation rather than the boot in reverse: the page fades into
+	// the screen, the screen switches off, the camera pulls out, the cartridge pops out and clicks back
+	// in, and the console folds shut and lands on the table.
 	async function returnToRoom() {
 		if (mode !== 'site') return;
 		await sound.resume();
 		timeline?.kill();
-		// Start from the end (the screen filling the view, the page on top) and play backwards. The
-		// layer's fade must record "visible" as where it started, so reversing it fades the room in.
-		layer.style.opacity = '1';
-		timeline = timelineFor();
-		timeline.progress(1, true);
-		power(true);
-		timeline.eventCallback('onReverseComplete', () => {
-			timeline?.timeScale(1);
-			setMode('room');
+		Object.assign(s, {
+			drift: 1,
+			rise: 1,
+			spin: 1,
+			pitch: 1,
+			open: 1,
+			cartOut: 0,
+			bob: 0,
+			dip: 0,
+			boot: BOOT_DURATION,
+			dive: 1
 		});
 		screenOff = false;
+		power(true);
+		const tl = gsap.timeline({ onComplete: () => setMode('room') });
+		tl.fromTo(layer, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: 'power1.out' }, 0)
+			.call(
+				() => {
+					screenOff = true;
+					power(false);
+				},
+				[],
+				0.4
+			)
+			.to(s, { dive: 0, duration: 1.0, ease: 'power2.inOut' }, 0.45)
+			.to(s, { bob: 1, duration: 0.4 }, 0.9)
+			.to(s, { cartOut: 1, duration: 0.35, ease: 'back.out(2)' }, 1.3)
+			.to(s, { cartOut: 0, duration: 0.25, ease: 'power3.in' }, 1.75)
+			.call(() => sound.click(), [], 2.0)
+			.to(s, { bob: 0, duration: 0.3 }, 2.0)
+			.to(s, { pitch: 0, duration: 0.6, ease: 'power2.inOut' }, 2.0)
+			.to(s, { open: 0, duration: 0.6, ease: 'power2.in' }, 2.1)
+			.to(s, { spin: 0, duration: 0.9, ease: 'power2.inOut' }, 2.0)
+			.to(s, { rise: 0, duration: 0.7, ease: 'bounce.out' }, 2.45)
+			.to(s, { drift: 0, duration: 1.4, ease: 'power2.inOut' }, 1.75);
+		timeline = tl;
 		setMode('returning');
-		// Played a little faster than the boot; once the page has faded into the screen, the screen
-		// switches off (no logo in reverse) and the power light goes out.
-		timeline.timeScale(1.6).reverse();
-		gsap.delayedCall(0.55, () => {
-			screenOff = true;
-			power(false);
-		});
 	}
 
 	function dispose() {
