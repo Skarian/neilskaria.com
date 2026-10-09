@@ -432,7 +432,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		const eye = centre.clone().addScaledVector(dir, size * 2.1);
 		// Aim a little right of the object, so it sits left of centre with the panel beside it.
 		const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), dir).normalize();
-		const target = centre.clone().addScaledVector(right, size * (camera.aspect > 1 ? 0.55 : 0));
+		const target = centre.clone().addScaledVector(right, size * (camera.aspect > 1 ? 0.22 : 0));
 		if (camera.aspect <= 1) target.y -= size * 0.35;
 		return { eye, target };
 	}
