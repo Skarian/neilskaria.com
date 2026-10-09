@@ -406,12 +406,13 @@
 			<div class="actions">
 				<button class="back" onclick={() => engine?.unfocus()}>◀ BACK</button>
 				<button
-					class="back power"
-					class:on={radio.on}
-					aria-pressed={radio.on}
+					class="power"
+					role="switch"
+					aria-checked={radio.on}
 					onclick={() => player.setOn(!radio.on)}
-					><span class="led"></span>{radio.on ? 'OFF' : 'ON'}</button
 				>
+					POWER <span class="toggle" aria-hidden="true"><span></span></span>
+				</button>
 			</div>
 		</aside>
 	{/if}
@@ -843,28 +844,63 @@
 		background: #ffb070;
 	}
 
+	/* The power switch: a label and a sliding toggle, green with the knob to the right when on. */
 	.power {
 		display: flex;
 		align-items: center;
-		gap: 0.45rem;
+		gap: 0.6rem;
+		margin-top: 0.3rem;
+		padding: 0.4rem 0.7rem 0.4rem 1.1rem;
+		border: 3px solid var(--ink);
+		border-radius: 999px;
+		background: #fffaf0;
+		color: var(--ink);
+		font-family: 'Arial Black', 'Helvetica Neue', Arial, sans-serif;
+		font-style: italic;
+		font-size: 0.75rem;
+		letter-spacing: 0.15em;
+		cursor: pointer;
+		box-shadow: 0 4px 0 var(--ink);
+		transition:
+			translate 0.08s,
+			box-shadow 0.08s;
 	}
 
-	.power.on {
-		background: #e2574c;
+	.power:active {
+		translate: 0 3px;
+		box-shadow: 0 1px 0 var(--ink);
 	}
 
-	/* A little power light: dark when off, glowing green when on. */
-	.led {
-		width: 0.55rem;
-		height: 0.55rem;
+	.toggle {
+		position: relative;
+		width: 2.6rem;
+		height: 1.4rem;
+		border: 3px solid var(--ink);
+		border-radius: 999px;
+		background: #8a8590;
+		box-shadow: inset 0 2px 0 rgb(0 0 0 / 0.2);
+		transition: background 0.2s;
+	}
+
+	.toggle span {
+		position: absolute;
+		top: 50%;
+		left: 0.12rem;
+		width: 0.95rem;
+		height: 0.95rem;
+		translate: 0 -50%;
 		border: 2px solid var(--ink);
 		border-radius: 50%;
-		background: #2c2a30;
+		background: #fffaf0;
+		transition: left 0.25s cubic-bezier(0.3, 1.6, 0.5, 1);
 	}
 
-	.power.on .led {
-		background: #6dff8a;
-		box-shadow: 0 0 6px #6dff8a;
+	.power[aria-checked='true'] .toggle {
+		background: #4fd66e;
+	}
+
+	.power[aria-checked='true'] .toggle span {
+		left: calc(100% - 0.95rem - 0.12rem);
 	}
 
 	.icon {

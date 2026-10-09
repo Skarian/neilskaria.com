@@ -483,8 +483,9 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	pose(0);
 	gltf.scene.updateMatrixWorld(true);
 	for (const thing of Object.keys(hover) as Thing[]) {
-		for (const part of PICK_PARTS[thing] ?? [/./]) {
-			const parts = meshes.filter(([m, of]) => of === thing && part.test(m.name));
+		// (Most objects are one shape, whatever their parts are called; the cube's pieces have no names.)
+		for (const part of PICK_PARTS[thing] ?? [null]) {
+			const parts = meshes.filter(([m, of]) => of === thing && (!part || part.test(m.name)));
 			const count = parts.reduce((n, [m]) => n + m.geometry.attributes.position.count, 0);
 			// A few thousand points are plenty for an outline.
 			const every = Math.max(1, Math.floor(count / 4000));
@@ -711,14 +712,15 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		const distance =
 			{
 				cube: camera.aspect > 1 ? 2.75 : 2.15,
-				clock: camera.aspect > 1 ? 1.6 : 1.65
+				clock: camera.aspect > 1 ? 1.6 : 1.47
 			}[thing as string] ?? (camera.aspect > 1 ? 2.1 : 1.85);
 		const eye = centre.clone().addScaledVector(dir, size * distance);
 		// Aim a little right of the object, so it sits left of centre with the panel beside it.
 		const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), dir).normalize();
 		const aside = thing === 'clock' ? 0.33 : 0.22;
 		const target = centre.clone().addScaledVector(right, size * (camera.aspect > 1 ? aside : 0));
-		if (camera.aspect <= 1) target.y -= size * 0.42;
+		// On phones the panel covers the lower half, so the object sits in the space above it.
+		if (camera.aspect <= 1) target.y -= size * (thing === 'clock' ? 0.55 : 0.42);
 		return { eye, target };
 	}
 

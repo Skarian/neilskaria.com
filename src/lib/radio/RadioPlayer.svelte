@@ -17,8 +17,8 @@
 </script>
 
 <div class="radio" role="group" aria-label="Radio">
-	<button class="power" class:on={radio.on} aria-pressed={radio.on} onclick={power}>
-		<span class="led"></span>{radio.on ? 'ON' : 'OFF'}
+	<button class="power" role="switch" aria-checked={radio.on} onclick={power}>
+		POWER <span class="toggle" aria-hidden="true"><span></span></span>
 	</button>
 	<button class="skip" onclick={() => player.skip(-1)} aria-label="Previous station">
 		<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3 2 8l6 5zM15 3 9 8l6 5z" /></svg>
@@ -80,17 +80,36 @@
 		fill: currentColor;
 	}
 
-	.led {
-		width: 0.5rem;
-		height: 0.5rem;
-		border: 1.5px solid #4c4f69;
-		border-radius: 50%;
-		background: #ccd0da;
+	/* The power switch: green with the knob to the right when on. */
+	.toggle {
+		position: relative;
+		width: 1.8rem;
+		height: 1rem;
+		border: 2px solid #4c4f69;
+		border-radius: 999px;
+		background: #bcc0cc;
+		transition: background 0.2s;
 	}
 
-	.power.on .led {
+	.toggle span {
+		position: absolute;
+		top: 50%;
+		left: 0.1rem;
+		width: 0.6rem;
+		height: 0.6rem;
+		translate: 0 -50%;
+		border-radius: 50%;
+		background: #fff;
+		box-shadow: 0 0 0 1.5px #4c4f69;
+		transition: left 0.25s cubic-bezier(0.3, 1.6, 0.5, 1);
+	}
+
+	.power[aria-checked='true'] .toggle {
 		background: #40d867;
-		box-shadow: 0 0 5px #40d867;
+	}
+
+	.power[aria-checked='true'] .toggle span {
+		left: calc(100% - 0.6rem - 0.1rem);
 	}
 
 	/* A little LED readout, like the clock radio's display. */
