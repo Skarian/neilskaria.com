@@ -11,7 +11,8 @@ import { introAssets, lightmapScales } from './assets';
 import { bakedMaterial, loadBakedLighting, swayTime, type BakedLighting } from './baked-material';
 import { BOOT_DURATION, drawBootScreen } from './boot-screen';
 import { drawClockLED, drawFrequencyLED } from './clock-led';
-import { FM_MAX, FM_MIN, STATIONS, stationAt, type Station } from './radio';
+import { FM_MIN } from '#lib/radio/radio.js';
+import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
 import {
 	createRubiks,
 	decodeMove,
@@ -25,19 +26,6 @@ import { createBootSound } from './sound';
 
 export type RoomMode = 'room' | 'booting' | 'site' | 'returning';
 export type Thing = 'sp' | 'cube' | 'clock' | 'lantern' | 'bonsai';
-
-// The clock radio, as the panel shows it.
-export type RadioState = {
-	on: boolean;
-	// FM, in MHz.
-	freq: number;
-	volume: number;
-	// The station coming in clearly, if any.
-	station: string | null;
-	// Every station, and the band the dial covers.
-	stations: Station[];
-	band: [number, number];
-};
 
 // The Rubik's cube game, as the panel shows it.
 export type CubeState = {
@@ -63,7 +51,8 @@ export type RoomOptions = {
 	// An object's mini-game has opened (or closed, with null).
 	onFocus: (thing: Thing | null) => void;
 	onCube: (state: CubeState) => void;
-	onRadio: (state: RadioState) => void;
+	// The boot chime is about to play (true), or the boot is over: music can dip under it.
+	onChime: (playing: boolean) => void;
 };
 
 export type Room = {
@@ -75,11 +64,8 @@ export type Room = {
 	setLantern: (color: string, level: number) => void;
 	scrambleCube: () => void;
 	solveCube: () => void;
-	setRadioOn: (on: boolean) => void;
-	// Tune straight to a frequency (while dragging the dial), or sweep across to it.
-	tuneRadio: (freq: number) => void;
-	sweepRadio: (freq: number) => void;
-	setRadioVolume: (volume: number) => void;
+	// Shows the site's radio on the clock radio: its power switch, dial and display.
+	setRadio: (state: { on: boolean; freq: number }) => void;
 	setMuted: (muted: boolean) => void;
 	dispose: () => void;
 };
@@ -94,8 +80,6 @@ const LANTERN_BAKED = new THREE.Color(1.0, 0.62, 0.3);
 const QUARTER = Math.PI / 2;
 // The cube's turns since it was last solved, so it stays as the visitor left it.
 const CUBE_KEY = 'cube-moves';
-// The radio's frequency and volume, so it's tuned where it was left.
-const RADIO_KEY = 'radio';
 // Where the numbers sit on the clock radio's printed FM scale (MHz, millimetres along the clock), so
 // the pointer lines up with them; the red pointer line is modelled at 70 mm.
 const FM_SCALE: [number, number][] = [
@@ -127,7 +111,7 @@ export function startView(aspect: number) {
 }
 
 export async function createRoom(options: RoomOptions): Promise<Room> {
-	const { canvas, layer, background, onProgress, onMode, onFocus, onCube, onRadio } = options;
+	const { canvas, layer, background, onProgress, onMode, onFocus, onCube, onChime } = options;
 
 	const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 	renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -239,7 +223,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	const yaw = Math.atan2(CAMERA_NEAR.x - FLOAT.x, CAMERA_NEAR.z - FLOAT.z);
 	let ledMaterial: THREE.MeshStandardMaterial | undefined;
 	let dialPointer: THREE.Object3D | undefined;
-	// The dial's printing and pointer, which light up while the radio's on.
+	// The dial's printing and pointer: always readable, and lit up while the radio's on.
 	const dialParts: THREE.Mesh[] = [];
 	const dialMaterials = new Map<THREE.Mesh, { off: THREE.Material; on: THREE.Material }>();
 	const paperMaterials: THREE.MeshBasicMaterial[] = [];
@@ -373,18 +357,14 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	for (const move of cubeHistory) rubiks.apply(move);
 	// The clock radio: the pointer slides along the dial, the tuning wheel turns, and the first
 	// slide switch is the power.
-	const radio = { on: false, freq: STATIONS[0].freq, volume: 0.7 };
-	try {
-		const saved = JSON.parse(localStorage.getItem(RADIO_KEY) ?? 'null');
-		if (typeof saved?.freq === 'number')
-			radio.freq = THREE.MathUtils.clamp(saved.freq, FM_MIN, FM_MAX);
-		if (typeof saved?.volume === 'number') radio.volume = THREE.MathUtils.clamp(saved.volume, 0, 1);
-	} catch {
-		// Nothing saved, or unreadable: the radio starts on the first station.
-	}
+	const radio = { on: false, freq: 88.5 };
 	for (const mesh of dialParts)
 		dialMaterials.set(mesh, {
-			off: mesh.material as THREE.Material,
+			off: new THREE.MeshBasicMaterial({
+				color: mesh === dialPointer ? '#9a2216' : '#8f8370',
+				polygonOffset: true,
+				polygonOffsetFactor: -1
+			}),
 			on: new THREE.MeshBasicMaterial({
 				color: mesh === dialPointer ? '#ff3a22' : '#ffe6bd',
 				polygonOffset: true,
@@ -491,6 +471,38 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		}
 	}
 	screen.geometry.computeBoundingBox();
+
+	// What's under the pointer is decided against a simple stand-in for each object: its convex
+	// outline, where it rests. Clicks don't fall through gaps (between the bonsai's leaves, say) to
+	// whatever's behind, and a hovered object floating up doesn't slip out from under the pointer.
+	const pickers: THREE.Mesh[] = [];
+	// The bonsai is two shapes, so the space between its pot and canopy stays clear.
+	const PICK_PARTS: Partial<Record<Thing, RegExp[]>> = {
+		bonsai: [/^Bonsai(Slate|Pot|Foot|Soil|Moss)/, /^Bonsai(Wood|Cores|Needle)/]
+	};
+	pose(0);
+	gltf.scene.updateMatrixWorld(true);
+	for (const thing of Object.keys(hover) as Thing[]) {
+		for (const part of PICK_PARTS[thing] ?? [/./]) {
+			const parts = meshes.filter(([m, of]) => of === thing && part.test(m.name));
+			const count = parts.reduce((n, [m]) => n + m.geometry.attributes.position.count, 0);
+			// A few thousand points are plenty for an outline.
+			const every = Math.max(1, Math.floor(count / 4000));
+			const points: THREE.Vector3[] = [];
+			for (const [mesh] of parts) {
+				const position = mesh.geometry.attributes.position;
+				for (let i = 0; i < position.count; i += every)
+					points.push(
+						new THREE.Vector3().fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld)
+					);
+			}
+			if (points.length < 4) continue;
+			const picker = new THREE.Mesh(new ConvexGeometry(points));
+			picker.userData.thing = thing;
+			picker.updateMatrixWorld();
+			pickers.push(picker);
+		}
+	}
 
 	// A soft contact shadow under the console while it rests on the nightstand.
 	const contact = new THREE.Mesh(
@@ -830,9 +842,9 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 
 	function thingAt(event: PointerEvent | MouseEvent): Thing | null {
 		raycaster.setFromCamera(ndcOf(event), camera);
-		const hit = raycaster.intersectObject(gltf.scene, true)[0];
 		// The first thing hit blocks anything behind it.
-		return hit ? thingOf(hit.object) : null;
+		const hit = raycaster.intersectObjects(pickers, false)[0];
+		return hit ? (hit.object.userData.thing as Thing) : null;
 	}
 
 	function thingOf(object: THREE.Object3D): Thing | null {
@@ -865,6 +877,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	function setHovered(thing: Thing | null) {
 		if (thing === hovered) return;
 		hovered = thing;
+		if (import.meta.env.DEV) Object.assign(window, { __hovered: thing });
 		for (const key of Object.keys(hover) as Thing[]) {
 			const on = key === thing;
 			gsap.to(hover, {
@@ -1126,67 +1139,18 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		});
 	}
 
-	// The radio only plays in the room, not behind the page.
-	function applyRadio() {
+	// The clock radio mirrors the site's radio: the power switch slides, the dial lights, and the
+	// display shows the frequency for a moment whenever it's tuned or switched on.
+	function setRadio(state: { on: boolean; freq: number }) {
+		if (state.freq !== radio.freq || (state.on && !radio.on))
+			showFrequencyUntil = performance.now() + 2500;
+		if (state.on !== radio.on) {
+			gsap.to(radioSwitch, { value: state.on ? 1 : 0, duration: 0.25, ease: 'back.out(2)' });
+			if (mode === 'room') sound.click();
+		}
+		Object.assign(radio, state);
 		for (const [mesh, materials] of dialMaterials)
 			mesh.material = radio.on ? materials.on : materials.off;
-		sound.radio.set({
-			on: radio.on && (mode === 'room' || mode === 'returning'),
-			freq: radio.freq,
-			volume: radio.volume
-		});
-		onRadio({
-			...radio,
-			station: stationAt(radio.freq)?.name ?? null,
-			stations: STATIONS,
-			band: [FM_MIN, FM_MAX]
-		});
-	}
-
-	function saveRadio() {
-		try {
-			localStorage.setItem(RADIO_KEY, JSON.stringify({ freq: radio.freq, volume: radio.volume }));
-		} catch {
-			// The radio just won't remember where it was.
-		}
-	}
-
-	function tuneRadio(freq: number) {
-		gsap.killTweensOf(radio);
-		radio.freq = THREE.MathUtils.clamp(freq, FM_MIN, FM_MAX);
-		showFrequencyUntil = performance.now() + 2500;
-		applyRadio();
-		saveRadio();
-	}
-
-	// Sweeps the dial across to a station, through whatever's in between.
-	function sweepRadio(freq: number) {
-		gsap.to(radio, {
-			freq: THREE.MathUtils.clamp(freq, FM_MIN, FM_MAX),
-			duration: 0.3 + Math.abs(freq - radio.freq) * 0.05,
-			ease: 'power2.inOut',
-			overwrite: true,
-			onUpdate: () => {
-				showFrequencyUntil = performance.now() + 2500;
-				applyRadio();
-			},
-			onComplete: saveRadio
-		});
-	}
-
-	function setRadioOn(on: boolean) {
-		void sound.resume();
-		radio.on = on;
-		sound.click();
-		gsap.to(radioSwitch, { value: on ? 1 : 0, duration: 0.25, ease: 'back.out(2)' });
-		if (on) showFrequencyUntil = performance.now() + 2500;
-		applyRadio();
-	}
-
-	function setRadioVolume(volume: number) {
-		radio.volume = THREE.MathUtils.clamp(volume, 0, 1);
-		applyRadio();
-		saveRadio();
 	}
 
 	// The tweens record their start values when the timeline is built, so it's always built from the
@@ -1208,7 +1172,9 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			.to(s, { dip: 1, duration: 0.08, yoyo: true, repeat: 1 }, 2.75)
 			.call(() => power(true), [], 2.8)
 			.fromTo(s, { boot: 0 }, { boot: BOOT_DURATION, duration: BOOT_DURATION, ease: 'none' }, 2.8)
+			.call(() => onChime(true), [], 2.5)
 			.call(() => sound.chime(), [], 2.8)
+			.call(() => onChime(false), [], 2.8 + BOOT_DURATION)
 			.to(s, { bob: 0, duration: 1.4 }, 3.3)
 			// A slow push while the logo plays, then one glide into the screen that slows to a stop
 			// as the screen fills, so there's no jolt when the page takes over.
@@ -1228,7 +1194,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	function setMode(next: RoomMode) {
 		mode = next;
 		updateLoop();
-		applyRadio();
 		if (import.meta.env.DEV)
 			Object.assign(window, { __boot: { s, timeline, scene, mode, camera, THREE } });
 		onMode(next);
@@ -1330,6 +1295,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		envMap.dispose();
 		mask.dispose();
 		rubiks.dispose();
+		for (const picker of pickers) picker.geometry.dispose();
 		screenTexture.dispose();
 		clockTexture.dispose();
 		renderer.dispose();
@@ -1347,10 +1313,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		setLantern,
 		scrambleCube: () => void scrambleCube(),
 		solveCube: () => void solveCube(),
-		setRadioOn,
-		tuneRadio,
-		sweepRadio,
-		setRadioVolume,
+		setRadio,
 		setMuted: (muted) => sound.setMuted(muted),
 		dispose
 	};

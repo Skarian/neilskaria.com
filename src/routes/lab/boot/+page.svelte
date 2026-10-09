@@ -2,6 +2,7 @@
 	import BootIntro from '#lib/boot/BootIntro.svelte';
 	import ScreenFrame from '#lib/boot/ScreenFrame.svelte';
 	import { room } from '#lib/boot/room.svelte.js';
+	import RadioPlayer from '#lib/radio/RadioPlayer.svelte';
 
 	// Placeholder "inside the screen" site so the intro has somewhere to land.
 	const PAPER = '#f6f1e7';
@@ -56,7 +57,10 @@
 				{/each}
 			</section>
 
-			<footer class="text-xs tracking-widest text-[#8c8fa1]">
+			<footer
+				class="flex flex-wrap items-center justify-between gap-4 text-xs tracking-widest text-[#8c8fa1]"
+			>
+				<RadioPlayer />
 				<!-- Only offered once the room has loaded in the background, so going back is instant. -->
 				{#if room.ready}
 					<button class="cursor-pointer hover:text-[#4c4f69]" onclick={room.open}>

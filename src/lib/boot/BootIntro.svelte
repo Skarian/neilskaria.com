@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { CubeState, RadioState, Room, RoomMode, Thing } from './engine';
+	import { FM_MAX, FM_MIN, player, radio, STATIONS } from '#lib/radio/player.svelte.js';
+	import type { CubeState, Room, RoomMode, Thing } from './engine';
 	import { room } from './room.svelte';
 
 	// Panels pop in like a game dialog: from small and tilted, overshooting a touch.
@@ -23,7 +24,8 @@
 	let { background }: { background: string } = $props();
 
 	const SEEN_KEY = 'boot-seen';
-	const MUTED_KEY = 'boot-muted';
+	// The lantern's colour and brightness, so it's as it was left.
+	const LANTERN_KEY = 'lantern';
 	// Where the visitor is in this tab ('room' or 'page'), so a reload puts them back there.
 	const PLACE_KEY = 'room-place';
 	// Runs before the page is painted, so the room's loading screen shows straight away (on a first
@@ -38,7 +40,6 @@
 	let layer = $state<HTMLDivElement>();
 	let phase = $state<'page' | 'loading' | 'room' | 'moving'>('page');
 	let progress = $state(0);
-	let muted = $state(false);
 	let pressed = $state(false);
 	let focused = $state<Thing | null>(null);
 
@@ -54,28 +55,33 @@
 	];
 	let lanternColor = $state(LANTERN_COLORS[0].css);
 	let lanternLevel = $state(1);
+	// Saving only starts once the saved lantern has been read, so the defaults never overwrite it.
+	let lanternLoaded = false;
 	$effect(() => {
 		// Read both first, so the effect tracks them even before the room has loaded.
 		const color = lanternColor;
 		const level = lanternLevel;
 		engine?.setLantern(color, level);
+		if (lanternLoaded) localStorage.setItem(LANTERN_KEY, JSON.stringify({ color, level }));
 	});
 	let engine: Room | undefined;
+	// Muting is site-wide: the room's sounds and the radio together.
+	$effect(() => {
+		const muted = radio.muted;
+		engine?.setMuted(muted);
+	});
+	// The clock radio shows whatever the site's radio is doing.
+	$effect(() => {
+		const state = { on: radio.on, freq: radio.freq };
+		engine?.setRadio(state);
+	});
 
 	// The Rubik's cube's state, from the room.
 	let cube = $state<CubeState>({ scrambled: false, solved: false, busy: false });
 
-	// The clock radio's state, from the room.
-	let radio = $state<RadioState>({
-		on: false,
-		freq: 88.5,
-		volume: 0.7,
-		station: null,
-		stations: [],
-		band: [87.5, 108]
-	});
 	// Where a frequency sits along the panel's dial, as a percentage.
-	const dialAt = (freq: number) => ((freq - radio.band[0]) / (radio.band[1] - radio.band[0])) * 100;
+	const dialAt = (freq: number) => ((freq - FM_MIN) / (FM_MAX - FM_MIN)) * 100;
+	const station = $derived(player.station());
 
 	// Confetti for a solve: scattered pieces in the cube's colours.
 	const CONFETTI = Array.from({ length: 28 }, (_, i) => ({
@@ -103,15 +109,17 @@
 			canvas: canvas!,
 			layer: layer!,
 			background,
-			muted,
+			muted: radio.muted,
 			startIn,
 			onProgress: (value) => (progress = value),
 			onMode,
 			onFocus: (thing) => (focused = thing),
 			onCube: (state) => (cube = state),
-			onRadio: (state) => (radio = state)
+			// The music dips a little under the boot chime.
+			onChime: (playing) => player.duck(playing)
 		});
 		engine.setLantern(lanternColor, lanternLevel);
+		engine.setRadio({ on: radio.on, freq: radio.freq });
 	}
 
 	function onMode(mode: RoomMode) {
@@ -146,9 +154,7 @@
 	}
 
 	function toggleSound() {
-		muted = !muted;
-		localStorage.setItem(MUTED_KEY, muted ? '1' : '0');
-		engine?.setMuted(muted);
+		player.setMuted(!radio.muted);
 	}
 
 	function keydown(event: KeyboardEvent) {
@@ -165,7 +171,15 @@
 	}
 
 	onMount(() => {
-		muted = localStorage.getItem(MUTED_KEY) === '1';
+		player.load();
+		try {
+			const saved = JSON.parse(localStorage.getItem(LANTERN_KEY) ?? 'null');
+			if (typeof saved?.color === 'string') lanternColor = saved.color;
+			if (typeof saved?.level === 'number') lanternLevel = Math.min(1.5, Math.max(0, saved.level));
+		} catch {
+			// Nothing saved: Paper white, full brightness.
+		}
+		lanternLoaded = true;
 		const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 		// A first visit, or a reload while in the room, starts in the room.
 		const inRoom = sessionStorage.getItem(PLACE_KEY) === 'room';
@@ -329,38 +343,38 @@
 			out:pop={{ duration: 220 }}
 		>
 			<p class="ribbon radio-ribbon">RADIO</p>
-			<h2>{radio.on ? (radio.station ?? 'Static…') : 'Radio off'}</h2>
+			<h2>{radio.on ? (station?.name ?? 'Static…') : 'Radio off'}</h2>
 			<div class="dial" style:--at="{dialAt(radio.freq)}%">
 				<div class="scale" aria-hidden="true">
 					{#each [88, 92, 96, 100, 104, 108] as mhz (mhz)}
 						<span style:left="{dialAt(mhz)}%">{mhz}</span>
 					{/each}
-					{#each radio.stations as station (station.freq)}
-						<i style:left="{dialAt(station.freq)}%"></i>
+					{#each STATIONS as s (s.freq)}
+						<i style:left="{dialAt(s.freq)}%"></i>
 					{/each}
 				</div>
 				<input
 					type="range"
-					min={radio.band[0]}
-					max={radio.band[1]}
+					min={FM_MIN}
+					max={FM_MAX}
 					step="0.1"
 					value={radio.freq}
-					oninput={(event) => engine?.tuneRadio(Number(event.currentTarget.value))}
+					oninput={(event) => player.tune(Number(event.currentTarget.value))}
 					aria-label="Tuning"
 					aria-valuetext="{radio.freq.toFixed(1)} FM"
 				/>
 			</div>
 			<p class="freq" class:on={radio.on}>{radio.freq.toFixed(1)} <small>FM</small></p>
 			<div class="presets" role="group" aria-label="Stations">
-				{#each radio.stations as station, i (station.freq)}
+				{#each STATIONS as s, i (s.freq)}
 					<button
-						aria-label={station.name}
-						title={station.name}
-						aria-pressed={radio.station === station.name}
+						aria-label={s.name}
+						title={s.name}
+						aria-pressed={station === s}
 						style:--i={i}
 						onclick={() => {
-							engine?.sweepRadio(station.freq);
-							if (!radio.on) engine?.setRadioOn(true);
+							player.sweep(s.freq);
+							if (!radio.on) player.setOn(true);
 						}}>{i + 1}</button
 					>
 				{/each}
@@ -375,7 +389,7 @@
 					max="1"
 					step="0.01"
 					value={radio.volume}
-					oninput={(event) => engine?.setRadioVolume(Number(event.currentTarget.value))}
+					oninput={(event) => player.setVolume(Number(event.currentTarget.value))}
 					aria-label="Volume"
 					style:--fill="{radio.volume * 100}%"
 				/>
@@ -395,7 +409,7 @@
 					class="back power"
 					class:on={radio.on}
 					aria-pressed={radio.on}
-					onclick={() => engine?.setRadioOn(!radio.on)}
+					onclick={() => player.setOn(!radio.on)}
 					><span class="led"></span>{radio.on ? 'OFF' : 'ON'}</button
 				>
 			</div>
@@ -403,7 +417,9 @@
 	{/if}
 
 	<div class="corner">
-		<button onclick={toggleSound} aria-pressed={!muted}>{muted ? 'SOUND OFF' : 'SOUND ON'}</button>
+		<button onclick={toggleSound} aria-pressed={!radio.muted}
+			>{radio.muted ? 'SOUND OFF' : 'SOUND ON'}</button
+		>
 		{#if phase !== 'page'}
 			<button onclick={() => engine?.skipToSite()}>SKIP TO SITE</button>
 		{/if}

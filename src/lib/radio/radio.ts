@@ -274,7 +274,8 @@ export function createRadio(ctx: AudioContext, out: AudioNode) {
 
 	// Schedules a little ahead of time, so the music never stutters.
 	function schedule() {
-		const until = ctx.currentTime + 0.15;
+		// Background tabs only get their timers run about once a second, so look further ahead there.
+		const until = ctx.currentTime + (document.hidden ? 1.3 : 0.15);
 		for (const c of channels) {
 			if (c.level < 0.001) {
 				c.next = 0;

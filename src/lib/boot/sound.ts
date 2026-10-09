@@ -1,7 +1,4 @@
-import { createRadio } from './radio';
-
-// Sound for the room: the boot chime, a click for the cartridge, the cube's clacks and the clock
-// radio. If the chime can't be loaded, a synthesized stand-in plays so the timing still lands.
+// Sound for the room: the boot chime, a click for the cartridge, and the cube's clacks. If the chime can't be loaded, a synthesized stand-in plays so the timing still lands.
 
 export async function createBootSound(chimeUrl: string, muted = false) {
 	const ctx = new AudioContext();
@@ -17,11 +14,8 @@ export async function createBootSound(chimeUrl: string, muted = false) {
 		chime = null;
 	}
 
-	const radio = createRadio(ctx, master);
-
 	return {
 		hasChime: chime !== null,
-		radio,
 		resume: () => ctx.resume(),
 		setMuted(value: boolean) {
 			master.gain.setTargetAtTime(value ? 0 : 1, ctx.currentTime, 0.02);
@@ -30,7 +24,10 @@ export async function createBootSound(chimeUrl: string, muted = false) {
 			if (chime) {
 				const source = ctx.createBufferSource();
 				source.buffer = chime;
-				source.connect(master);
+				// The recording is mastered loud; this sits it nicely alongside everything else.
+				const gain = ctx.createGain();
+				gain.gain.value = 0.5;
+				source.connect(gain).connect(master);
 				source.start();
 				return;
 			}
@@ -70,10 +67,7 @@ export async function createBootSound(chimeUrl: string, muted = false) {
 		fanfare() {
 			[523.25, 659.25, 783.99, 1046.5].forEach((f, i) => bell(ctx, master, f, i * 0.09, 0.8));
 		},
-		close: () => {
-			radio.dispose();
-			return ctx.close();
-		}
+		close: () => ctx.close()
 	};
 }
 
