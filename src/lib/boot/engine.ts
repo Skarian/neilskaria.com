@@ -63,7 +63,7 @@ const LANTERN_BAKED = new THREE.Color(1.0, 0.62, 0.3);
 // Landscape screens see the bed and the bedside table; portrait screens centre on the table.
 export function startView(aspect: number) {
 	return aspect < 1
-		? { eye: new THREE.Vector3(0.9, 3.4, 18.5), target: new THREE.Vector3(-0.3, 0.7, 0) }
+		? { eye: new THREE.Vector3(0.1, 2.6, 21), target: new THREE.Vector3(-0.3, 0.1, 0) }
 		: { eye: new THREE.Vector3(4.2, 3.2, 14), target: new THREE.Vector3(-1.8, -0.6, 0) };
 }
 

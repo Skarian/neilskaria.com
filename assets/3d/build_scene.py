@@ -289,7 +289,9 @@ sp = gba_sp.build()['sp']
 
 TOP = -gba_sp.BASE_H * gba_sp.U - 0.0005
 FLOOR = TOP - 7.0
-groups = {'props': [], 'bed': [], 'room': [], 'foliage': []}
+groups = {'props': [], 'bed': [], 'room': [], 'foliage': [], 'wall': [], 'plant': []}
+# Lightmap size per group (others use ATLAS).
+GROUP_SIZE = {'wall': 2048, 'plant': 512}
 bake_only = []
 
 
@@ -324,7 +326,7 @@ for obj in lantern_parts + [lantern_paper]:
 for obj in lantern_parts:
 	add('props', obj)
 
-add('room', place(import_model('potted_plant_02'), (6.6, 0.2, FLOOR), rot_z=0.4))
+add('plant', place(import_model('potted_plant_02'), (6.6, 0.2, FLOOR), rot_z=0.4))
 
 # Bed: a mid-century oak frame on splayed legs, a white mattress, a navy quilted comforter with the
 # top sheet turned down over it, and plump pillows against an oak headboard.
@@ -446,11 +448,12 @@ WIN = (BED_CX - 5.0, BED_CX + 5.0, FLOOR + 13.5, FLOOR + 25.5)
 wall_mat = textured('Wall', 'beige_wall_001', tint=LOOK['wall'])
 for name, x0, x1, z0, z1 in [
 	('WallLeft', -35, WIN[0], FLOOR, FLOOR + 32),
-	('WallRight', WIN[1], 25, FLOOR, FLOOR + 32),
+	('WallRight', WIN[1], 14, FLOOR, FLOOR + 32),
+	('WallFar', 14, 25, FLOOR, FLOOR + 32),
 	('WallBelow', WIN[0], WIN[1], FLOOR, WIN[2]),
 	('WallAbove', WIN[0], WIN[1], WIN[3], FLOOR + 32),
 ]:
-	add('room', box(name, (x1 - x0, 0.5, z1 - z0), ((x0 + x1) / 2, WALL_Y + 0.25, (z0 + z1) / 2), wall_mat))
+	add('wall' if name == 'WallRight' else 'room', box(name, (x1 - x0, 0.5, z1 - z0), ((x0 + x1) / 2, WALL_Y + 0.25, (z0 + z1) / 2), wall_mat))
 add('room', box('SideWall', (0.5, 50, 32), (-35.25, -18, FLOOR + 16), wall_mat))
 
 wx, wz = (WIN[0] + WIN[1]) / 2, (WIN[2] + WIN[3]) / 2
@@ -519,7 +522,7 @@ bake_only += [
 ]
 
 # Tiling textures get world-space UVs (size = units per texture repeat).
-for obj, size in [(floor, 16), (rug, 8), (rails, 8), (mattress, 6), (nightstand, 6)] + [(o, 8) for o in groups['bed'] if o.name == 'Headboard'] + [(o, 6) for o in groups['room'] if o.name.startswith('BedLeg')] + [(o, 18) for o in groups['room'] if o.name.startswith(('Wall', 'SideWall'))]:
+for obj, size in [(floor, 16), (rug, 8), (rails, 8), (mattress, 6), (nightstand, 6)] + [(o, 8) for o in groups['bed'] if o.name == 'Headboard'] + [(o, 6) for o in groups['room'] if o.name.startswith('BedLeg')] + [(o, 18) for o in groups['room'] + groups['wall'] if o.name.startswith(('Wall', 'SideWall'))]:
 	apply_modifiers(obj)
 	uv_box(obj, size)
 for obj in groups['props'] + groups['bed'] + groups['room'] + bake_only:
@@ -539,7 +542,8 @@ for obj in [o for objs in groups.values() for o in objs]:
 
 sun = bpy.data.objects.new('Sun', bpy.data.lights.new('Sun', 'SUN'))
 sun.data.energy, sun.data.color = LOOK['sun']
-sun.data.angle = math.radians(1.0)
+sun.data.energy *= float(os.environ.get('SUN_SCALE', 0.5))
+sun.data.angle = math.radians(float(os.environ.get('SUN_ANGLE', 12.0)))
 # Aimed through the middle of the lower-right pane (not the crossbars) at the bedside table.
 sun.rotation_euler = (Vector((0, 0.3, TOP)) - Vector((wx + 2.5, WALL_Y, wz - 3.0))).to_track_quat('-Z', 'Y').to_euler()
 scene.collection.objects.link(sun)
@@ -556,7 +560,10 @@ scene.collection.objects.link(fill)
 lamp = bpy.data.objects.new('LampLight', bpy.data.lights.new('LampLight', 'POINT'))
 lamp.data.energy = LOOK['lamp']
 lamp.data.color = (1.0, 0.62, 0.3)
-lamp.data.shadow_soft_size = 0.08
+# The bulb is as big as the lantern's paper shade (about 13 cm), so its light comes out soft and even,
+# the way washi diffuses it, rather than projecting the lattice across the room. DIFFUSE_LANTERN=0
+# gives the old small, hard bulb.
+lamp.data.shadow_soft_size = 0.65 if os.environ.get('DIFFUSE_LANTERN', '1') == '1' else 0.08
 lamp.location = Vector((lamp_x, lamp_y, TOP)) + Vector(lantern_light)
 scene.collection.objects.link(lamp)
 
@@ -624,7 +631,8 @@ for group, objs in groups.items():
 
 
 def bake(group, state):
-	img = bpy.data.images.new(f'{group}-{state}', ATLAS, ATLAS, float_buffer=True)
+	size = GROUP_SIZE.get(group, ATLAS)
+	img = bpy.data.images.new(f'{group}-{state}', size, size, float_buffer=True)
 	for obj in groups[group]:
 		for slot in obj.material_slots:
 			nodes = slot.material.node_tree.nodes
@@ -634,7 +642,7 @@ def bake(group, state):
 			nodes.active = target
 	select(groups[group])
 	bpy.ops.object.bake(type='DIFFUSE', uv_layer='Lightmap', margin=8, use_clear=True)
-	px = np.array(img.pixels[:], dtype=np.float32).reshape(ATLAS, ATLAS, 4)[:, :, :3]
+	px = np.array(img.pixels[:], dtype=np.float32).reshape(size, size, 4)[:, :, :3]
 	# A 3x3 median removes leftover specks; the blur then smooths sampling noise.
 	shifted = [np.roll(np.roll(px, dy, 0), dx, 1) for dy in (-1, 0, 1) for dx in (-1, 0, 1)]
 	px = np.median(np.stack(shifted), axis=0)
@@ -643,9 +651,9 @@ def bake(group, state):
 	scale = float(max(np.percentile(px, 99.7), 1e-4))
 	lin = np.clip(px / scale, 0, 1)
 	srgb = np.where(lin <= 0.0031308, lin * 12.92, 1.055 * np.power(lin, 1 / 2.4) - 0.055)
-	out = bpy.data.images.new(f'{group}-{state}-out', ATLAS, ATLAS)
+	out = bpy.data.images.new(f'{group}-{state}-out', size, size)
 	out.colorspace_settings.name = 'Non-Color'
-	out.pixels = np.concatenate([srgb, np.ones((ATLAS, ATLAS, 1), np.float32)], 2).ravel()
+	out.pixels = np.concatenate([srgb, np.ones((size, size, 1), np.float32)], 2).ravel()
 	# Lossless: these get multiplied up to ~25x on the site, which turns JPEG's colour noise into blotches.
 	out.filepath_raw = str(OUT_DIR / f'{group}-{state}.png')
 	out.file_format = 'PNG'
@@ -692,13 +700,19 @@ if PREVIEW:
 	scene.collection.objects.link(cam)
 	scene.camera = cam
 	scene.render.resolution_x, scene.render.resolution_y = 1200, 750
+	only = os.environ.get('VIEWS')
 	scene.cycles.use_denoising = True
 	scene.view_settings.view_transform = 'Filmic'
 	scene.view_settings.exposure = LOOK['exposure']
 	scene.view_settings.look = LOOK['look']
 	look_name = os.environ.get('LOOK', 'alita')
-	views = [('start', (4.2, -14, 3.2), (-1.8, 0, -0.6)), ('near', (0.9, -6, 1.9), (0, -0.9, 1.45)), ('bed', (4.0, -27, 9.5), (-8.5, -6, -2.5)), ('table', (0.4, -5.2, 1.6), (0.0, 0.5, 0.4))]
+	views = [('phone', (0.9, -18.5, 3.4), (-0.3, 0, 0.7)), ('start', (4.2, -14, 3.2), (-1.8, 0, -0.6)), ('near', (0.9, -6, 1.9), (0, -0.9, 1.45)), ('bed', (4.0, -27, 9.5), (-8.5, -6, -2.5)), ('table', (0.4, -5.2, 1.6), (0.0, 0.5, 0.4))]
 	for name, eye, target in views:
+		if only and name not in only.split(','):
+			continue
+		portrait = name == 'phone'
+		scene.render.resolution_x, scene.render.resolution_y = (540, 1170) if portrait else (1200, 750)
+		cam.data.sensor_fit = 'VERTICAL'
 		cam.location = eye
 		cam.rotation_euler = (Vector(target) - Vector(eye)).to_track_quat('-Z', 'Y').to_euler()
 		for state in ('both',):
