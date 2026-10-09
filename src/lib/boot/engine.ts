@@ -71,6 +71,9 @@ export type Room = {
 	solveCube: () => void;
 	waterBonsai: () => void;
 	resetBonsai: () => void;
+	// Turns the bonsai by an angle (as its wheel is dragged); let go, it coasts at the last turn's speed.
+	turnBonsai: (by: number) => void;
+	releaseBonsai: (by: number) => void;
 	// Shows the site's radio on the clock radio: its power switch, dial and display.
 	setRadio: (state: { on: boolean; freq: number }) => void;
 	setMuted: (muted: boolean) => void;
@@ -1081,9 +1084,10 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 				spin = 0;
 				return;
 			}
-			// Like the cube: a drag starting on the foliage slashes; one starting anywhere else (around
-			// the tree, on its trunk, the pot or the table) turns it.
-			if (!nearFoliage(event)) {
+			// With a mouse, like the cube: a drag starting on the foliage slashes, one anywhere else turns
+			// the tree. On a touch screen every one-finger drag slashes; the panel's wheel (or two
+			// fingers) turns it.
+			if (event.pointerType === 'mouse' && !nearFoliage(event)) {
 				turning = { x: event.clientX };
 				spin = 0;
 			} else {
@@ -1762,6 +1766,14 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		solveCube: () => void solveCube(),
 		waterBonsai,
 		resetBonsai,
+		turnBonsai: (by) => {
+			if (focused !== 'bonsai') return;
+			spin = 0;
+			turnTree(by);
+		},
+		releaseBonsai: (by) => {
+			if (focused === 'bonsai') spin = by;
+		},
 		setRadio,
 		setMuted: (muted) => sound.setMuted(muted),
 		dispose

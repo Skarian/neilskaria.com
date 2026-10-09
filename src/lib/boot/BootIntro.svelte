@@ -87,6 +87,25 @@
 	// neat (1) to wild (about 1.7).
 	let bonsai = $state<BonsaiState>({ shagginess: 1 });
 	const GROWTH_MAX = 1.7;
+	// The turn wheel: dragged sideways, it turns the tree; its ridges roll with it.
+	let wheel: { x: number; by: number } | null = null;
+	let wheelRoll = $state(0);
+	function wheelDown(event: PointerEvent) {
+		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+		wheel = { x: event.clientX, by: 0 };
+	}
+	function wheelMove(event: PointerEvent) {
+		if (!wheel) return;
+		const dx = event.clientX - wheel.x;
+		wheel.x = event.clientX;
+		wheel.by = dx * 0.012;
+		wheelRoll += dx;
+		engine?.turnBonsai(wheel.by);
+	}
+	function wheelUp() {
+		if (wheel) engine?.releaseBonsai(wheel.by);
+		wheel = null;
+	}
 	const treeLooks = $derived(
 		bonsai.shagginess > 1.35
 			? 'Needs a trim'
@@ -477,8 +496,30 @@
 				<span>BARE</span><span>NEAT</span><span>WILD</span>
 			</p>
 			<p class="hint">
-				Slash the leaves to cut them, or tap for a light snip. Drag anywhere else to turn the tree.
+				Slash the leaves to cut them, or tap for a light snip. Roll the wheel to turn the tree.
 			</p>
+			<div
+				class="wheel"
+				role="slider"
+				tabindex="0"
+				aria-label="Turn the tree"
+				aria-valuenow={0}
+				style:--roll="{wheelRoll}px"
+				onpointerdown={wheelDown}
+				onpointermove={wheelMove}
+				onpointerup={wheelUp}
+				onpointercancel={wheelUp}
+				onkeydown={(event) => {
+					if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+						event.preventDefault();
+						const by = event.key === 'ArrowLeft' ? -0.3 : 0.3;
+						wheelRoll += by * 80;
+						engine?.turnBonsai(by);
+					}
+				}}
+			>
+				<span aria-hidden="true">◀ TURN ▶</span>
+			</div>
 			<div class="actions">
 				<button class="back" onclick={() => engine?.unfocus()}>◀ BACK</button>
 				<button class="back go water" onclick={() => engine?.waterBonsai()}>WATER</button>
@@ -1018,6 +1059,48 @@
 		width: var(--at);
 		background: linear-gradient(90deg, #cfe3a8, #7fbf63 50%, #3f6f2c);
 		transition: width 0.25s ease-out;
+	}
+
+	/* A ridged thumbwheel, like the clock radio's tuning wheel: its ridges roll as it's dragged. */
+	.wheel {
+		position: relative;
+		width: 100%;
+		height: 2.6rem;
+		display: grid;
+		place-items: center;
+		border: 3px solid var(--ink);
+		border-radius: 14px;
+		background:
+			linear-gradient(
+				90deg,
+				rgb(0 0 0 / 0.45),
+				transparent 22%,
+				transparent 78%,
+				rgb(0 0 0 / 0.45)
+			),
+			repeating-linear-gradient(90deg, #6b5a4c 0 6px, #3f342c 6px 9px) var(--roll) 0 / auto;
+		box-shadow:
+			0 4px 0 var(--ink),
+			inset 0 2px 0 rgb(255 255 255 / 0.15);
+		cursor: ew-resize;
+		touch-action: none;
+		user-select: none;
+	}
+
+	.wheel span {
+		padding: 0.15rem 0.6rem;
+		border-radius: 999px;
+		background: rgb(251 241 223 / 0.92);
+		font-family: 'Arial Black', 'Helvetica Neue', Arial, sans-serif;
+		font-style: italic;
+		font-size: 0.65rem;
+		letter-spacing: 0.15em;
+		pointer-events: none;
+	}
+
+	.wheel:focus-visible {
+		outline: 2px solid #ff8f5a;
+		outline-offset: 3px;
 	}
 
 	.ends {
