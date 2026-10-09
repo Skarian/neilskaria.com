@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { FM_MAX, FM_MIN, player, radio, STATIONS } from '#lib/radio/player.svelte.js';
 	import type { BonsaiState, CubeState, Room, RoomMode, Thing } from './engine';
 	import { room } from './room.svelte';
@@ -74,6 +74,29 @@
 	$effect(() => {
 		const state = { on: radio.on, freq: radio.freq };
 		engine?.setRadio(state);
+	});
+
+	// On phones the open panel sits at the bottom: the room frames the object in the space above it,
+	// so it's told how much that is whenever the panel opens or changes size.
+	$effect(() => {
+		if (!focused) return;
+		let observer: ResizeObserver | undefined;
+		const report = () => {
+			const panel = layer?.querySelector<HTMLElement>('.panel');
+			if (panel && innerWidth <= 640) engine?.setFreeAbove(panel.offsetTop / innerHeight);
+		};
+		void tick().then(() => {
+			const panel = layer?.querySelector<HTMLElement>('.panel');
+			if (!panel) return;
+			report();
+			observer = new ResizeObserver(report);
+			observer.observe(panel);
+		});
+		addEventListener('resize', report);
+		return () => {
+			observer?.disconnect();
+			removeEventListener('resize', report);
+		};
 	});
 
 	// The Rubik's cube's state, from the room.
@@ -495,9 +518,7 @@
 			<p class="ends" aria-hidden="true">
 				<span>BARE</span><span>NEAT</span><span>WILD</span>
 			</p>
-			<p class="hint">
-				Slash the leaves to cut them, or tap for a light snip. Roll the wheel to turn the tree.
-			</p>
+			<p class="hint">Slash to cut, tap to snip. Roll the wheel to turn the tree.</p>
 			<div
 				class="wheel"
 				role="slider"
@@ -528,7 +549,7 @@
 		</aside>
 	{/if}
 
-	<div class="corner">
+	<div class="corner" class:raised={focused}>
 		<button onclick={toggleSound} aria-pressed={!radio.muted}
 			>{radio.muted ? 'SOUND OFF' : 'SOUND ON'}</button
 		>
@@ -1283,14 +1304,49 @@
 		}
 	}
 
+	/* On phones the panel docks at the bottom, compact, with the corner buttons moved up out of its way. */
 	@media (max-width: 640px) {
 		.panel {
 			top: auto;
-			bottom: 4.5rem;
-			left: 1rem;
-			right: 1rem;
+			bottom: 0.75rem;
+			left: 0.75rem;
+			right: 0.75rem;
 			width: auto;
 			translate: 0 0;
+			gap: 0.65rem;
+			padding: 1.5rem 1rem 1rem;
+		}
+
+		.panel h2 {
+			font-size: 1.05rem;
+		}
+
+		.hint {
+			font-size: 0.68rem;
+			line-height: 1.35;
+		}
+
+		.wheel {
+			height: 2.2rem;
+		}
+
+		.corner.raised {
+			top: 0.9rem;
+			bottom: auto;
+		}
+
+		/* The buttons share the width, so they never spill out, whatever the text size. */
+		.panel .actions {
+			width: 100%;
+		}
+
+		.panel .actions > button {
+			flex: 1 1 0;
+			min-width: 0;
+			padding-inline: 0.3rem;
+			justify-content: center;
+			font-size: min(0.75rem, 3vw);
+			letter-spacing: 0.08em;
 		}
 	}
 

@@ -69,6 +69,8 @@ export type Room = {
 	setLantern: (color: string, level: number) => void;
 	scrambleCube: () => void;
 	solveCube: () => void;
+	// The share of the screen above an open panel, on phones (where the panel sits at the bottom).
+	setFreeAbove: (fraction: number) => void;
 	waterBonsai: () => void;
 	resetBonsai: () => void;
 	// Turns the bonsai by an angle (as its wheel is dragged); let go, it coasts at the last turn's speed.
@@ -802,15 +804,50 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 				clock: camera.aspect > 1 ? 1.6 : 1.47,
 				bonsai: camera.aspect > 1 ? 1.45 : 1.12
 			}[thing as string] ?? (camera.aspect > 1 ? 2.1 : 1.85);
-		const eye = centre.clone().addScaledVector(dir, size * distance);
+		// On phones the panel covers the bottom of the screen: the object is fitted into the space left
+		// above it (further back when that's small) and centred there.
+		const portrait = camera.aspect <= 1;
+		let d = size * distance * (portrait ? THREE.MathUtils.clamp(0.5 / freeAbove, 0.8, 1.5) : 1);
+		// And never wider than a narrow screen.
+		if (portrait) {
+			const extent = box.getSize(new THREE.Vector3());
+			const across = thing === 'cube' ? size : Math.hypot(extent.x, extent.z);
+			const halfWidth = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect;
+			d = Math.max(d, (across * 0.52) / halfWidth);
+		}
+		const eye = centre.clone().addScaledVector(dir, d);
 		// Aim a little right of the object, so it sits left of centre with the panel beside it.
 		const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), dir).normalize();
 		const aside = thing === 'clock' ? 0.33 : 0.22;
-		const target = centre.clone().addScaledVector(right, size * (camera.aspect > 1 ? aside : 0));
-		// On phones the panel covers the lower half, so the object sits in the space above it.
-		if (camera.aspect <= 1)
-			target.y -= size * (thing === 'clock' ? 0.55 : thing === 'bonsai' ? 0.36 : 0.42);
+		const target = centre.clone().addScaledVector(right, size * (portrait ? 0 : aside));
+		if (portrait) {
+			const up = new THREE.Vector3(0, 1, 0).addScaledVector(dir, -dir.y).normalize();
+			const halfHeight = d * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+			target.addScaledVector(up, -(1 - freeAbove) * halfHeight);
+		}
 		return { eye, target };
+	}
+
+	// How much of a phone's screen is left above an open panel (0-1), so the object is framed there.
+	let freeAbove = 0.52;
+	function setFreeAbove(fraction: number) {
+		freeAbove = THREE.MathUtils.clamp(fraction, 0.3, 0.9);
+		if (!focused) return;
+		const v = viewOf(focused);
+		gsap.to(focusView.eye, {
+			x: v.eye.x,
+			y: v.eye.y,
+			z: v.eye.z,
+			duration: 0.5,
+			ease: 'power2.out'
+		});
+		gsap.to(focusView.target, {
+			x: v.target.x,
+			y: v.target.y,
+			z: v.target.z,
+			duration: 0.5,
+			ease: 'power2.out'
+		});
 	}
 
 	function focus(thing: Thing) {
@@ -1766,6 +1803,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		solveCube: () => void solveCube(),
 		waterBonsai,
 		resetBonsai,
+		setFreeAbove,
 		turnBonsai: (by) => {
 			if (focused !== 'bonsai') return;
 			spin = 0;
