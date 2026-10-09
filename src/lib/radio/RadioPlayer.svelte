@@ -6,6 +6,17 @@
 	// music carries on from one to the other. Off until it's switched on.
 
 	const station = $derived(player.station());
+	const label = $derived(
+		{
+			off: 'Radio off',
+			static: 'Static…',
+			tuning: 'Tuning…',
+			playing: station?.name ?? 'Static…',
+			offair: 'Off air',
+			blocked: 'Tap to listen'
+		}[radio.status]
+	);
+	const link = $derived(radio.status === 'playing' ? player.link() : null);
 
 	function power() {
 		// Switching it on means wanting to hear it, even if the room's sound was turned off.
@@ -25,7 +36,10 @@
 	</button>
 	<p class="readout" class:on={radio.on} aria-live="polite">
 		<span class="freq">{radio.freq.toFixed(1)}</span>
-		<span class="name">{radio.on ? (station?.name ?? 'Static…') : 'Radio off'}</span>
+		<span class="name">{label}</span>
+		{#if link}
+			<a href={link} target="_blank" rel="noreferrer" aria-label="Open the stream">↗</a>
+		{/if}
 	</p>
 	<button class="skip" onclick={() => player.skip(1)} aria-label="Next station">
 		<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3l6 5-6 5zM1 3l6 5-6 5z" /></svg>
@@ -142,6 +156,16 @@
 	.freq {
 		font-weight: 700;
 		font-variant-numeric: tabular-nums;
+	}
+
+	.readout a {
+		color: inherit;
+		text-decoration: none;
+		opacity: 0.7;
+	}
+
+	.readout a:hover {
+		opacity: 1;
 	}
 
 	.name {

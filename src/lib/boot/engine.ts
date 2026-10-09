@@ -12,7 +12,7 @@ import { bakedMaterial, loadBakedLighting, swayTime, type BakedLighting } from '
 import { createBonsai } from './bonsai';
 import { BOOT_DURATION, drawBootScreen } from './boot-screen';
 import { drawClockLED, drawFrequencyLED } from './clock-led';
-import { FM_MIN } from '#lib/radio/radio.js';
+import { FM_MIN } from '#lib/radio/stations.js';
 import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
 import {
 	createRubiks,
@@ -56,8 +56,6 @@ export type RoomOptions = {
 	onFocus: (thing: Thing | null) => void;
 	onCube: (state: CubeState) => void;
 	onBonsai: (state: BonsaiState) => void;
-	// The boot chime is about to play (true), or the boot is over: music can dip under it.
-	onChime: (playing: boolean) => void;
 };
 
 export type Room = {
@@ -124,8 +122,7 @@ export function startView(aspect: number) {
 }
 
 export async function createRoom(options: RoomOptions): Promise<Room> {
-	const { canvas, layer, background, onProgress, onMode, onFocus, onCube, onBonsai, onChime } =
-		options;
+	const { canvas, layer, background, onProgress, onMode, onFocus, onCube, onBonsai } = options;
 
 	const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 	renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -1733,9 +1730,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			.to(s, { dip: 1, duration: 0.08, yoyo: true, repeat: 1 }, 2.75)
 			.call(() => power(true), [], 2.8)
 			.fromTo(s, { boot: 0 }, { boot: BOOT_DURATION, duration: BOOT_DURATION, ease: 'none' }, 2.8)
-			.call(() => onChime(true), [], 2.5)
 			.call(() => sound.chime(), [], 2.8)
-			.call(() => onChime(false), [], 2.8 + BOOT_DURATION)
 			.to(s, { bob: 0, duration: 1.4 }, 3.3)
 			// A slow push while the logo plays, then one glide into the screen that slows to a stop
 			// as the screen fills, so there's no jolt when the page takes over.

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { FM_MAX, FM_MIN, player, radio, STATIONS } from '#lib/radio/player.svelte.js';
+	import { FM_MAX, FM_MIN, player, radio, STATIONS, STREAMS } from '#lib/radio/player.svelte.js';
 	import type { BonsaiState, CubeState, Room, RoomMode, Thing } from './engine';
 	import { room } from './room.svelte';
 
@@ -109,6 +109,18 @@
 	// Where a frequency sits along the panel's dial, as a percentage.
 	const dialAt = (freq: number) => ((freq - FM_MIN) / (FM_MAX - FM_MIN)) * 100;
 	const station = $derived(player.station());
+	// What the radio's doing, in words: its station once it's really playing.
+	const radioTitle = $derived(
+		{
+			off: 'Radio off',
+			static: 'Static…',
+			tuning: 'Tuning…',
+			playing: station?.name ?? 'Static…',
+			offair: 'Off air',
+			blocked: 'Tap to listen'
+		}[radio.status]
+	);
+	const radioLink = $derived(radio.status === 'playing' ? player.link() : null);
 
 	// The bonsai's state, from the room: how far its shoots reach on average, from bare (0) through
 	// neat (1) to wild (about 1.7).
@@ -182,7 +194,7 @@
 					// Left between stations last time: find the nearest one, rather than start on static.
 					if (!player.station())
 						player.sweep(
-							STATIONS.reduce((a, b) =>
+							STREAMS.reduce((a, b) =>
 								Math.abs(b.freq - radio.freq) < Math.abs(a.freq - radio.freq) ? b : a
 							).freq
 						);
@@ -193,9 +205,7 @@
 				focused = thing;
 			},
 			onCube: (state) => (cube = state),
-			onBonsai: (state) => (bonsai = state),
-			// The music dips a little under the boot chime.
-			onChime: (playing) => player.duck(playing)
+			onBonsai: (state) => (bonsai = state)
 		});
 		engine.setLantern(lanternColor, lanternLevel);
 		engine.setRadio({ on: radio.on, freq: radio.freq });
@@ -422,7 +432,12 @@
 			out:pop={{ duration: 220 }}
 		>
 			<p class="ribbon radio-ribbon">RADIO</p>
-			<h2>{radio.on ? (station?.name ?? 'Static…') : 'Radio off'}</h2>
+			<h2 class="station" class:waiting={radio.status === 'tuning'}>
+				{radioTitle}
+				{#if radioLink}
+					<a href={radioLink} target="_blank" rel="noreferrer" aria-label="Open the stream">↗</a>
+				{/if}
+			</h2>
 			<div class="dial" style:--at="{dialAt(radio.freq)}%">
 				<div class="scale" aria-hidden="true">
 					{#each [88, 92, 96, 100, 104, 108] as mhz (mhz)}
@@ -445,7 +460,7 @@
 			</div>
 			<p class="freq" class:on={radio.on}>{radio.freq.toFixed(1)} <small>FM</small></p>
 			<div class="presets" role="group" aria-label="Stations">
-				{#each STATIONS as s, i (s.freq)}
+				{#each STREAMS as s, i (s.freq)}
 					<button
 						aria-label={s.name}
 						title={s.name}
@@ -963,14 +978,36 @@
 		font-size: 0.65rem;
 	}
 
+	/* The station's name, with a small link out to its stream once it's playing. */
+	.station {
+		display: flex;
+		align-items: baseline;
+		gap: 0.4rem;
+	}
+
+	.station a {
+		font-size: 0.85rem;
+		font-style: normal;
+		opacity: 0.55;
+		text-decoration: none;
+	}
+
+	.station a:hover {
+		opacity: 1;
+	}
+
+	.station.waiting {
+		animation: blink 1.2s steps(2) infinite;
+	}
+
 	/* Preset buttons, chunky like a car radio's. */
 	.presets {
 		display: flex;
-		gap: 0.6rem;
+		gap: 0.45rem;
 	}
 
 	.presets button {
-		width: 2.6rem;
+		width: 2.3rem;
 		height: 2.3rem;
 		border: 3px solid var(--ink);
 		border-radius: 10px;
