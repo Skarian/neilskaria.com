@@ -11,7 +11,6 @@ import { introAssets, lightmapScales } from './assets';
 import { bakedMaterial, loadBakedLighting, swayTime, type BakedLighting } from './baked-material';
 import { BOOT_DURATION, drawBootScreen } from './boot-screen';
 import { drawClockLED } from './clock-led';
-import { FIT, snapshotPage } from './page-snapshot';
 import { createBootSound } from './sound';
 
 export type RoomMode = 'room' | 'booting' | 'site' | 'returning';
@@ -94,11 +93,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	screenTexture.colorSpace = THREE.SRGBColorSpace;
 	screenTexture.flipY = false;
 	const screenMaterial = new THREE.MeshBasicMaterial({ color: '#1d201d', toneMapped: false });
-	// A copy of the page, shown on the screen when going back to the room.
-	const pageCanvas = document.createElement('canvas');
-	pageCanvas.width = screenCanvas.width;
-	pageCanvas.height = screenCanvas.height;
-	const pageCtx = pageCanvas.getContext('2d')!;
 	const screenFade = { value: 0 };
 
 	// The clock radio shows the visitor's own time.
@@ -357,7 +351,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		const up = new THREE.Vector3(0, 0, 1).applyMatrix3(normalMatrix).normalize();
 
 		const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-		const distance = Math.min(size.z / 2 / tan, size.x / 2 / (tan * camera.aspect)) * FIT;
+		const distance = Math.min(size.z / 2 / tan, size.x / 2 / (tan * camera.aspect)) * 0.97;
 		finalPos.copy(center).addScaledVector(normal, distance);
 		finalQuat.setFromRotationMatrix(new THREE.Matrix4().lookAt(finalPos, center, up));
 
@@ -473,20 +467,12 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 
 		if (s.boot >= 0 && !screenOff) {
 			if (mode === 'returning') {
-				// The page, as it was, fading to black as the screen switches off.
-				screenCtx.drawImage(pageCanvas, 0, 0);
+				// The lit screen (in the page's colour) fading to black as it switches off.
+				screenCtx.fillStyle = background;
+				screenCtx.fillRect(0, 0, screenCanvas.width, screenCanvas.height);
 				screenCtx.fillStyle = `rgba(0, 0, 0, ${screenFade.value})`;
 				screenCtx.fillRect(0, 0, screenCanvas.width, screenCanvas.height);
-			} else {
-				drawBootScreen(screenCtx, s.boot, background);
-				// As the logo ends, the screen crossfades into the page, so the hand-over is seamless.
-				const reveal = THREE.MathUtils.clamp((s.boot - (BOOT_DURATION - 0.6)) / 0.5, 0, 1);
-				if (reveal > 0) {
-					screenCtx.globalAlpha = reveal;
-					screenCtx.drawImage(pageCanvas, 0, 0);
-					screenCtx.globalAlpha = 1;
-				}
-			}
+			} else drawBootScreen(screenCtx, s.boot, background);
 			screenTexture.needsUpdate = true;
 		}
 		renderer.render(scene, camera);
@@ -601,8 +587,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		screenOff = false;
 		unfocus();
 		setHovered(null);
-		snapshotPage(pageCtx, document.body, background);
-		await sound.resume();
+		// Never wait on audio: the animation starts right away, sound joins in when the browser allows it.
+		void sound.resume();
 		timeline?.kill();
 		timeline = timelineFor();
 		timeline.eventCallback('onComplete', () => setMode('site'));
@@ -624,7 +610,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	// in, and the console folds shut and lands on the table.
 	async function returnToRoom() {
 		if (mode !== 'site') return;
-		await sound.resume();
+		// Never wait on audio: the animation starts right away, sound joins in when the browser allows it.
+		void sound.resume();
 		timeline?.kill();
 		Object.assign(s, {
 			drift: 1,
@@ -640,11 +627,10 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		});
 		screenOff = false;
 		power(true);
-		// The screen keeps showing the page while the camera pulls out, then fades off.
-		snapshotPage(pageCtx, document.body, background);
+		// The page fades out to the lit screen, the camera pulls out, then the screen switches off.
 		screenFade.value = 0;
 		const tl = gsap.timeline({ onComplete: () => setMode('room') });
-		tl.fromTo(layer, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: 'power1.out' }, 0)
+		tl.fromTo(layer, { opacity: 0 }, { opacity: 1, duration: 0.45, ease: 'power1.inOut' }, 0)
 			.call(
 				() => {
 					screenOff = true;

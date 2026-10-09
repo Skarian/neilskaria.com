@@ -154,10 +154,9 @@
 			const connection = (navigator as Navigator & { connection?: NetworkInformation }).connection;
 			const slow = connection?.saveData || /(^|-)2g$/.test(connection?.effectiveType ?? '');
 			if (!slow) {
+				// The room reports where it is itself (on the page, paused) once it has loaded.
 				const run = () =>
-					load('site')
-						.then(() => onMode('site'))
-						.catch((error) => console.error('The room failed to load', error));
+					load('site').catch((error) => console.error('The room failed to load', error));
 				if ('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 4000 });
 				else setTimeout(run, 2000);
 			}
@@ -176,7 +175,7 @@
 
 <svelte:window onkeydown={keydown} />
 
-<div bind:this={layer} class="room-layer" aria-hidden={phase === 'page'} data-snapshot-skip>
+<div bind:this={layer} class="room-layer" aria-hidden={phase === 'page'}>
 	<canvas bind:this={canvas} class:live={phase !== 'loading'}></canvas>
 
 	{#if phase === 'loading'}
