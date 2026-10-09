@@ -731,12 +731,17 @@ if PREVIEW:
 			bpy.ops.render.render(write_still=True)
 	sys.exit(0)
 
+# SKIP_BAKE=1 re-exports the model with the previous bake's lighting, for changes that don't affect
+# it (the console is lit live). The lightmap UVs come out the same as long as the room is unchanged.
+if os.environ.get('SKIP_BAKE'):
+	STATES = ()
 scales = {group: {} for group in groups}
 for state in STATES:
 	set_state(state)
 	for group in groups:
 		scales[group][state] = bake(group, state)
-(OUT_DIR / 'lightmaps.json').write_text(json.dumps(scales, indent=2))
+if STATES:
+	(OUT_DIR / 'lightmaps.json').write_text(json.dumps(scales, indent=2))
 for tree, out, original in glass_links:
 	tree.links.new(original, out.inputs['Surface'])
 

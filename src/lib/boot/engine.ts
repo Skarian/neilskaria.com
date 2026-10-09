@@ -173,7 +173,9 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	const screen = gltf.scene.getObjectByName('Screen') as THREE.Mesh;
 	const cart = gltf.scene.getObjectByName('Cartridge')!;
 	sp.rotation.order = 'YXZ';
-	const rest = sp.position.clone();
+	// Set down casually: forward on the table, a little off centre, turned a bit.
+	const rest = sp.position.clone().add(new THREE.Vector3(0.18, 0, 0.55));
+	const REST_YAW = THREE.MathUtils.degToRad(-16);
 	const cartRest = cart.position.clone();
 	const yaw = Math.atan2(CAMERA_NEAR.x - FLOAT.x, CAMERA_NEAR.z - FLOAT.z);
 	let ledMaterial: THREE.MeshStandardMaterial | undefined;
@@ -258,7 +260,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		new THREE.PlaneGeometry(1.25, 1.2),
 		new THREE.MeshBasicMaterial({ map: softDot('0,0,0'), transparent: true, depthWrite: false })
 	);
-	contact.rotation.x = -Math.PI / 2;
+	contact.rotation.set(-Math.PI / 2, 0, REST_YAW);
 	contact.position.set(rest.x, rest.y - 0.145, rest.z);
 	scene.add(contact);
 
@@ -341,7 +343,11 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	function pose(t: number) {
 		sp.position.lerpVectors(rest, FLOAT, s.rise);
 		sp.position.y += s.bob * 0.05 * Math.sin(t * 2.2) - s.dip * 0.05 + hover.sp * 0.06;
-		sp.rotation.set(s.pitch * PITCH, s.spin * (Math.PI * 2 + yaw), hover.sp * 0.04);
+		sp.rotation.set(
+			s.pitch * PITCH,
+			THREE.MathUtils.lerp(REST_YAW, Math.PI * 2 + yaw, s.spin),
+			hover.sp * 0.04
+		);
 		lid.rotation.x = -s.open * OPEN;
 		cart.position.copy(cartRest);
 		cart.position.z += s.cartOut * 0.45;
@@ -626,8 +632,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	}
 
 	// Going back is its own, shorter animation rather than the boot in reverse: the page fades into
-	// the screen, the screen switches off, the camera pulls out, the cartridge pops out and clicks back
-	// in, and the console folds shut and lands on the table.
+	// the screen, the screen switches off, the camera pulls out, and the console folds shut and lands on
+	// the table. (The cartridge only pops out and clicks in on the way in, when it's switched on.)
 	async function returnToRoom() {
 		if (mode !== 'site') return;
 		// Never wait on audio: the animation starts right away, sound joins in when the browser allows it.
@@ -662,9 +668,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			.to(screenFade, { value: 1, duration: 0.3, ease: 'power2.in' }, 0.85)
 			.to(s, { dive: 0, duration: 1.0, ease: 'power2.inOut' }, 0.45)
 			.to(s, { bob: 1, duration: 0.4 }, 0.9)
-			.to(s, { cartOut: 1, duration: 0.35, ease: 'back.out(2)' }, 1.3)
-			.to(s, { cartOut: 0, duration: 0.25, ease: 'power3.in' }, 1.75)
-			.call(() => sound.click(), [], 2.0)
 			.to(s, { bob: 0, duration: 0.3 }, 2.0)
 			.to(s, { pitch: 0, duration: 0.6, ease: 'power2.inOut' }, 2.0)
 			.to(s, { open: 0, duration: 0.6, ease: 'power2.in' }, 2.1)

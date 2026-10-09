@@ -166,14 +166,15 @@ def build():
 	apply_modifiers(lid)
 	seam = groove_frame(W, lid_d, CORNER, GAP + LID_H / 2)
 	seam.location = mm(0, lid_cy, 0)
-	for c in [seam, cutter_slab('badge', stadium(20, 6.5), GAP + LID_H - 0.25, GAP + LID_H + 1, (-21, -33.5, 0))]:
+	for c in [seam, cutter_slab('badge', stadium(24.6, 7.4), GAP + LID_H - 0.25, GAP + LID_H + 1, (0, -32.5, 0))]:
 		cut(lid, c)
 	set_origin(lid, mm(0, HINGE_Y, HINGE_Z))
 	set_parent(lid, sp)
 	cylinder('HingeLid', HINGE_R * U, 28.3 * U, mm(14.15, HINGE_Y, HINGE_Z), shell, rot=(0, math.radians(90), 0), bevel=1.2 * U, parent=lid, verts=48, segments=3)
 	# The middle knuckle is part of the lid, so it joins the lid without a seam.
 	box('HingeNeck', mm(27.6, 5.6, LID_H - 2.4), mm(14.15, LID_BACK + 2.2, HINGE_Z), shell, bevel=1.0 * U, parent=lid)
-	slab('Badge', stadium(19.4, 6.0), (GAP + LID_H - 0.25) * U, (GAP + LID_H - 0.05) * U, mm(-21, -33.5, 0), material('BadgePlate', (0.08, 0.08, 0.09), roughness=0.3), parent=lid)
+	# The oval badge (blank here) is centred along the lid's front edge, as on the real console.
+	slab('Badge', stadium(24.0, 6.9), (GAP + LID_H - 0.25) * U, (GAP + LID_H - 0.05) * U, mm(0, -32.5, 0), material('BadgePlate', (0.08, 0.08, 0.09), roughness=0.3), parent=lid)
 
 	# The inner face (facing -Z when closed): a glossy cover, the LCD window, five rubber bumpers.
 	free_edge = -D / 2
