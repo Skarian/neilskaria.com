@@ -190,6 +190,9 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	// fast it's still spinning after, and how long the watering has left to run.
 	let slash: { last: { x: number; y: number }; moved: number } | null = null;
 	let turning: { x: number } | null = null;
+	// Fingers on the bonsai (two at once turn it, wherever they are).
+	const fingers = new Map<number, number>();
+	const fingersX = () => [...fingers.values()].reduce((a, b) => a + b, 0) / fingers.size;
 	let spin = 0;
 	let watering = 0;
 	let bonsaiDirty = false;
@@ -379,14 +382,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		gltf.scene.getObjectByName('Nightstand') ?? slate
 	);
 	nightstandTop.min.y = slateBox.min.y;
-	// The parts of the tree that turn it: the pot, its feet and soil, and the slate under it.
-	const potParts: THREE.Object3D[] = [];
-	const treeParts: THREE.Object3D[] = [];
-	gltf.scene.traverse((o) => {
-		if (o instanceof THREE.Mesh && /^Bonsai(Pot|Foot|Soil|Moss|Slate)/.test(o.name))
-			potParts.push(o);
-		else if (o instanceof THREE.Mesh && /^Bonsai(Wood|Twigs)/.test(o.name)) treeParts.push(o);
-	});
 	const BITS = 120;
 	const bits = new THREE.InstancedMesh(
 		new THREE.PlaneGeometry(0.01, 0.05),
@@ -1078,9 +1073,17 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	function pointerdown(event: PointerEvent) {
 		if (focused === 'bonsai' && mode === 'room') {
 			canvas.setPointerCapture(event.pointerId);
-			// Like the cube: a drag starting on the tree (or just off its foliage) slashes; a drag
-			// anywhere around it, or on the pot, turns it.
-			if (onPot(event) || !nearTree(event)) {
+			fingers.set(event.pointerId, event.clientX);
+			// A second finger turns the tree, whatever the first was doing.
+			if (fingers.size > 1) {
+				slash = null;
+				turning = { x: fingersX() };
+				spin = 0;
+				return;
+			}
+			// Like the cube: a drag starting on the foliage slashes; one starting anywhere else (around
+			// the tree, on its trunk, the pot or the table) turns it.
+			if (!nearFoliage(event)) {
 				turning = { x: event.clientX };
 				spin = 0;
 			} else {
@@ -1171,9 +1174,11 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		rubiks.setAngle(cubeDrag.sign * progress * QUARTER);
 	}
 
-	async function pointerup() {
+	async function pointerup(event: PointerEvent) {
+		fingers.delete(event.pointerId);
 		if (turning) {
-			turning = null;
+			if (fingers.size) turning.x = fingersX();
+			else turning = null;
 			return;
 		}
 		if (slash) {
@@ -1297,13 +1302,11 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		return { x: ((onScreen.x + 1) / 2) * innerWidth, y: ((1 - onScreen.y) / 2) * innerHeight };
 	}
 
-	// On the tree's branches or foliage, or within a finger's width of its foliage.
-	function nearTree(event: PointerEvent) {
-		raycaster.setFromCamera(ndcOf(event), camera);
-		if (raycaster.intersectObjects(treeParts, false).length) return true;
+	// On the foliage, or just off its edge (so a slash can begin a little outside a pad).
+	function nearFoliage(event: PointerEvent) {
 		bonsai.turntable.updateMatrixWorld();
 		const matrix = bonsai.turntable.matrixWorld;
-		const margin = matchMedia('(pointer: coarse)').matches ? 44 : 32;
+		const margin = matchMedia('(pointer: coarse)').matches ? 14 : 22;
 		for (let s = 0; s < bonsai.count; s++) {
 			const reach = Math.ceil(bonsai.lengths[s]);
 			const nodes = bonsai.shoots[s].nodes;
@@ -1313,11 +1316,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			}
 		}
 		return false;
-	}
-
-	function onPot(event: PointerEvent) {
-		raycaster.setFromCamera(ndcOf(event), camera);
-		return raycaster.intersectObjects(potParts, false).length > 0;
 	}
 
 	function turnTree(by: number) {
@@ -1410,11 +1408,13 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	}
 
 	function dragTree(event: PointerEvent) {
+		if (fingers.has(event.pointerId)) fingers.set(event.pointerId, event.clientX);
 		if (turning) {
-			const by = (event.clientX - turning.x) * 0.01;
+			const x = fingers.size ? fingersX() : event.clientX;
+			const by = (x - turning.x) * 0.01;
 			turnTree(by);
 			spin = by;
-			turning.x = event.clientX;
+			turning.x = x;
 			return;
 		}
 		if (slash) {
@@ -1425,8 +1425,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			trailPoints.push({ ...to, at: performance.now() });
 			return;
 		}
-		if (event.pointerType === 'mouse')
-			canvas.style.cursor = onPot(event) || !nearTree(event) ? 'grab' : SCISSORS;
+		if (event.pointerType === 'mouse') canvas.style.cursor = nearFoliage(event) ? SCISSORS : 'grab';
 	}
 
 	// The trail: a bright stroke that thins and fades from its tail.
@@ -1576,6 +1575,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 
 	function leaveTree() {
 		slash = turning = null;
+		fingers.clear();
 		spin = 0;
 		// Turned back to face the front, the short way round.
 		const now = bonsai.turntable.rotation.y;

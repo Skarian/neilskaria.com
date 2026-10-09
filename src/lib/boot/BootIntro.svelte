@@ -470,14 +470,15 @@
 				aria-valuetext={treeLooks}
 				style:--at="{Math.min(1, bonsai.shagginess / GROWTH_MAX) * 100}%"
 			>
+				<span class="fill" aria-hidden="true"></span>
 				<span class="neat" aria-hidden="true"></span>
-				<span class="needle" aria-hidden="true"></span>
 			</div>
 			<p class="ends" aria-hidden="true">
 				<span>BARE</span><span>NEAT</span><span>WILD</span>
 			</p>
 			<p class="hint">
-				Slash across the leaves to cut them; tap for a light snip. Drag around the tree to turn it.
+				Slash across the leaves to cut them; tap for a light snip. Drag the trunk, pot or space
+				around to turn the tree (or use two fingers).
 			</p>
 			<div class="actions">
 				<button class="back" onclick={() => engine?.unfocus()}>◀ BACK</button>
@@ -994,33 +995,30 @@
 		height: 1.1rem;
 		border: 3px solid var(--ink);
 		border-radius: 999px;
-		background: linear-gradient(90deg, #cfe3a8, #7fbf63 46%, #5f9e4f 54%, #3f6f2c);
+		background: #e9dcc6;
+		overflow: hidden;
 		box-shadow: inset 0 -3px 0 rgb(0 0 0 / 0.12);
 	}
 
 	.growth .neat {
 		position: absolute;
 		left: calc(1 / 1.7 * 100%);
-		top: -0.45rem;
-		bottom: -0.45rem;
+		top: 0;
+		bottom: 0;
 		width: 3px;
+		z-index: 1;
 		translate: -50% 0;
 		border-radius: 2px;
 		background: var(--ink);
 	}
 
-	.growth .needle {
+	/* How grown the tree is, as a level filling the gauge: pale new growth, through neat, to wild. */
+	.growth .fill {
 		position: absolute;
-		left: var(--at);
-		top: 50%;
-		width: 1.25rem;
-		height: 1.25rem;
-		translate: -50% -50%;
-		border: 3px solid var(--ink);
-		border-radius: 50%;
-		background: #fffaf0;
-		box-shadow: 0 2px 0 var(--ink);
-		transition: left 0.2s ease-out;
+		inset: 0 auto 0 0;
+		width: var(--at);
+		background: linear-gradient(90deg, #cfe3a8, #7fbf63 50%, #3f6f2c);
+		transition: width 0.25s ease-out;
 	}
 
 	.ends {
