@@ -69,8 +69,9 @@ export type Room = {
 	setLantern: (color: string, level: number) => void;
 	scrambleCube: () => void;
 	solveCube: () => void;
-	// The share of the screen above an open panel, on phones (where the panel sits at the bottom).
-	setFreeAbove: (fraction: number) => void;
+	// The share of the screen left free by an open panel: above it on phones (where it docks at the
+	// bottom), or to its left on wider screens.
+	setFree: (side: 'above' | 'left', fraction: number) => void;
 	waterBonsai: () => void;
 	resetBonsai: () => void;
 	// Turns the bonsai by an angle (as its wheel is dragged); let go, it coasts at the last turn's speed.
@@ -801,25 +802,35 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		const distance =
 			{
 				cube: camera.aspect > 1 ? 2.75 : 2.15,
-				clock: camera.aspect > 1 ? 1.6 : 1.47,
-				bonsai: camera.aspect > 1 ? 1.45 : 0.98
+				clock: camera.aspect > 1 ? 1.5 : 1.47,
+				bonsai: camera.aspect > 1 ? 1.08 : 0.98
 			}[thing as string] ?? (camera.aspect > 1 ? 2.1 : 1.85);
 		// On phones the panel covers the bottom of the screen: the object is fitted into the space left
 		// above it (further back when that's small) and centred there.
 		const portrait = camera.aspect <= 1;
-		let d = size * distance * (portrait ? THREE.MathUtils.clamp(0.5 / freeAbove, 0.8, 1.5) : 1);
-		// And the clock radio (the wide one) never wider than a narrow screen.
-		if (portrait && thing === 'clock') {
+		// On wider screens the panel's on the right: likewise, the object goes in the space to its left.
+		let d =
+			size *
+			distance *
+			(portrait
+				? THREE.MathUtils.clamp(0.5 / freeAbove, 0.8, 1.5)
+				: THREE.MathUtils.clamp(0.58 / freeLeft, 0.9, 1.5));
+		// And the clock radio (the wide one) never wider than the space it has.
+		if (thing === 'clock') {
 			const extent = box.getSize(new THREE.Vector3());
 			const across = Math.hypot(extent.x, extent.z);
-			const halfWidth = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect;
+			const space = portrait ? 1 : freeLeft * 0.9;
+			const halfWidth = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect * space;
 			d = Math.max(d, (across * 0.52) / halfWidth);
 		}
 		const eye = centre.clone().addScaledVector(dir, d);
-		// Aim a little right of the object, so it sits left of centre with the panel beside it.
+		// Aim right of the object, so it sits centred in the space left of the panel.
 		const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), dir).normalize();
-		const aside = thing === 'clock' ? 0.33 : 0.22;
-		const target = centre.clone().addScaledVector(right, size * (portrait ? 0 : aside));
+		const target = centre.clone();
+		if (!portrait) {
+			const halfWidth = d * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect;
+			target.addScaledVector(right, (1 - freeLeft) * halfWidth);
+		}
 		if (portrait) {
 			const up = new THREE.Vector3(0, 1, 0).addScaledVector(dir, -dir.y).normalize();
 			const halfHeight = d * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
@@ -830,8 +841,11 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 
 	// How much of a phone's screen is left above an open panel (0-1), so the object is framed there.
 	let freeAbove = 0.52;
-	function setFreeAbove(fraction: number) {
-		freeAbove = THREE.MathUtils.clamp(fraction, 0.3, 0.9);
+	// And on wider screens, how much is left of it.
+	let freeLeft = 0.58;
+	function setFree(side: 'above' | 'left', fraction: number) {
+		if (side === 'above') freeAbove = THREE.MathUtils.clamp(fraction, 0.3, 0.9);
+		else freeLeft = THREE.MathUtils.clamp(fraction, 0.4, 0.9);
 		if (!focused) return;
 		const v = viewOf(focused);
 		gsap.to(focusView.eye, {
@@ -1803,7 +1817,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		solveCube: () => void solveCube(),
 		waterBonsai,
 		resetBonsai,
-		setFreeAbove,
+		setFree,
 		turnBonsai: (by) => {
 			if (focused !== 'bonsai') return;
 			spin = 0;

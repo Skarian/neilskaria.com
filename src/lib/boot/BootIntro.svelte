@@ -83,7 +83,11 @@
 		let observer: ResizeObserver | undefined;
 		const report = () => {
 			const panel = layer?.querySelector<HTMLElement>('.panel');
-			if (panel && innerWidth <= 640) engine?.setFreeAbove(panel.offsetTop / innerHeight);
+			if (!panel) return;
+			const box = panel.getBoundingClientRect();
+			if (innerWidth <= 640 || innerWidth <= innerHeight)
+				engine?.setFree('above', box.top / innerHeight);
+			else engine?.setFree('left', box.left / innerWidth);
 		};
 		void tick().then(() => {
 			const panel = layer?.querySelector<HTMLElement>('.panel');
@@ -722,7 +726,7 @@
 	}
 
 	/* Bigger on desktop, where the room leaves plenty of space. */
-	@media (min-width: 900px) and (min-height: 600px) {
+	@media (min-width: 1200px) and (min-height: 700px) {
 		.panel {
 			zoom: 1.3;
 		}
@@ -1304,15 +1308,19 @@
 		}
 	}
 
-	/* On phones the panel docks at the bottom, compact, with the corner buttons moved up out of its way. */
-	@media (max-width: 640px) {
+	/* On phones (and any upright screen, like a tablet held portrait) the panel docks at the bottom,
+	   compact, with the corner buttons moved up out of its way. */
+	@media (max-width: 640px), (max-aspect-ratio: 1/1) {
 		.panel {
 			top: auto;
 			bottom: 0.75rem;
 			left: 0.75rem;
 			right: 0.75rem;
 			width: auto;
+			max-width: 26rem;
+			margin-inline: auto;
 			translate: 0 0;
+			zoom: 1;
 			gap: 0.65rem;
 			padding: 1.5rem 1rem 1rem;
 		}
