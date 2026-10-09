@@ -189,7 +189,7 @@
 	{#if phase === 'room' && !focused}
 		<div class="start">
 			<button class:pressed onclick={start} aria-label="Start: open the site" data-start>
-				{#each 'START' as letter, i (i)}<span style:--i={i}>{letter}</span>{/each}
+				START
 			</button>
 		</div>
 	{/if}
@@ -312,6 +312,8 @@
 		letter-spacing: 0.18em;
 		color: #e9e3da;
 		cursor: pointer;
+		position: relative;
+		isolation: isolate;
 		background: linear-gradient(180deg, #5d5a63, #3a3840 55%, #2b2930);
 		box-shadow:
 			0 5px 0 #17151b,
@@ -322,61 +324,58 @@
 			box-shadow 0.08s;
 	}
 
-	/* The letters ripple gently while waiting; on hover they hop in turn and cycle through the
-	   lantern's colours; pressing squashes them. */
-	.start span {
-		display: inline-block;
-		animation: wave 2.4s calc(var(--i) * 0.12s) ease-in-out infinite;
+	/* A ring of the lantern's colours travels round the button, with a soft glow of the same colours
+	   behind it that brightens on hover. */
+	@property --angle {
+		syntax: '<angle>';
+		initial-value: 0deg;
+		inherits: false;
 	}
 
-	.start button:hover span {
-		animation:
-			hop 0.55s calc(var(--i) * 0.07s) cubic-bezier(0.3, 1.8, 0.5, 1) infinite alternate,
-			hue 1.6s calc(var(--i) * -0.25s) linear infinite;
+	.start button::before,
+	.start button::after {
+		content: '';
+		position: absolute;
+		inset: -3px;
+		border-radius: inherit;
+		background: conic-gradient(
+			from var(--angle),
+			#ffe2bf,
+			#ff9a5c,
+			#ff7fa6,
+			#9be36f,
+			#5ec8e8,
+			#ffe2bf
+		);
+		animation: orbit 3s linear infinite;
+		pointer-events: none;
 	}
 
-	.start button:active span,
-	.start button.pressed span {
-		animation: none;
-		scale: 1.15 0.75;
-		transition: scale 0.08s;
+	.start button::before {
+		padding: 3px;
+		mask:
+			linear-gradient(#000 0 0) content-box exclude,
+			linear-gradient(#000 0 0);
 	}
 
-	@keyframes wave {
-		0%,
-		60%,
-		100% {
-			translate: 0 0;
-		}
-		30% {
-			translate: 0 -2px;
-		}
+	.start button::after {
+		z-index: -1;
+		filter: blur(12px);
+		opacity: 0.35;
+		transition: opacity 0.25s;
 	}
 
-	@keyframes hop {
-		from {
-			translate: 0 0;
-		}
+	.start button:hover::after {
+		opacity: 0.75;
+	}
+
+	.start button:hover {
+		color: #fff6ea;
+	}
+
+	@keyframes orbit {
 		to {
-			translate: 0 -5px;
-		}
-	}
-
-	@keyframes hue {
-		0% {
-			color: #ffe2bf;
-		}
-		25% {
-			color: #ff7fa6;
-		}
-		50% {
-			color: #9be36f;
-		}
-		75% {
-			color: #5ec8e8;
-		}
-		100% {
-			color: #ffe2bf;
+			--angle: 360deg;
 		}
 	}
 
@@ -662,8 +661,8 @@
 	@media (prefers-reduced-motion: reduce) {
 		.loading,
 		.start,
-		.start span,
-		.start button:hover span {
+		.start button::before,
+		.start button::after {
 			animation: none;
 		}
 	}

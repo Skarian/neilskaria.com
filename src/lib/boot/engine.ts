@@ -257,8 +257,22 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		const thing = object instanceof THREE.Mesh ? thingOf(object) : null;
 		if (thing && !/ClockDigits/.test(object.name)) meshes.push([object as THREE.Mesh, thing]);
 	});
+	const centreOf = {} as Record<Thing, THREE.Vector3>;
+	for (const thing of Object.keys(hover) as Thing[]) {
+		const box = new THREE.Box3();
+		for (const [mesh, of] of meshes) if (of === thing) box.expandByObject(mesh);
+		centreOf[thing] = box.getCenter(new THREE.Vector3());
+	}
 	const mask = new THREE.WebGLRenderTarget(1, 1);
-	const maskMaterial = new THREE.MeshBasicMaterial({ color: '#ffffff' });
+	// The mask's red channel is the hovered object; green marks objects nearer the camera, which the
+	// outline must not be drawn over.
+	const maskMaterial = new THREE.MeshBasicMaterial({ color: '#ff0000' });
+	const occluderMaterial = new THREE.MeshBasicMaterial({
+		color: '#00ff00',
+		blending: THREE.AdditiveBlending,
+		depthTest: false,
+		depthWrite: false
+	});
 	const outlinePass = new THREE.Mesh(
 		new THREE.PlaneGeometry(2, 2),
 		new THREE.ShaderMaterial({
@@ -278,7 +292,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 						float a = float( i ) * 0.5236;
 						near = max( near, texture2D( mask, vUv + vec2( cos( a ), sin( a ) ) * texel * 2.5 ).r );
 					}
-					float edge = clamp( near - inside, 0.0, 1.0 );
+					float edge = clamp( near - inside, 0.0, 1.0 ) * ( 1.0 - texture2D( mask, vUv ).g );
 					gl_FragColor = vec4( 1.0, 0.98, 0.94, edge * opacity );
 				}`,
 			transparent: true,
@@ -490,11 +504,11 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		const centre = box.getCenter(new THREE.Vector3());
 		const size = box.getSize(new THREE.Vector3()).length();
 		const dir = (FOCUS_FROM[thing] ?? new THREE.Vector3(0.12, 0.22, 1)).clone().normalize();
-		const eye = centre.clone().addScaledVector(dir, size * 2.1);
+		const eye = centre.clone().addScaledVector(dir, size * (camera.aspect > 1 ? 2.1 : 1.85));
 		// Aim a little right of the object, so it sits left of centre with the panel beside it.
 		const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), dir).normalize();
 		const target = centre.clone().addScaledVector(right, size * (camera.aspect > 1 ? 0.22 : 0));
-		if (camera.aspect <= 1) target.y -= size * 0.35;
+		if (camera.aspect <= 1) target.y -= size * 0.42;
 		return { eye, target };
 	}
 
@@ -571,7 +585,12 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			renderer.setRenderTarget(mask);
 			renderer.setClearColor(0x000000, 1);
 			renderer.clear();
+			renderer.autoClear = false;
 			renderer.render(scene, camera);
+			scene.overrideMaterial = occluderMaterial;
+			camera.layers.set(2);
+			renderer.render(scene, camera);
+			renderer.autoClear = true;
 			renderer.setRenderTarget(null);
 			camera.layers.set(0);
 			scene.overrideMaterial = null;
@@ -645,9 +664,13 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			});
 		}
 		if (thing) {
+			// Objects nearer the camera than the hovered one hide its outline where they overlap it.
+			const distance = (t: Thing) => centreOf[t].distanceTo(camera.position);
 			for (const [mesh, of] of meshes) {
 				if (of === thing) mesh.layers.enable(1);
 				else mesh.layers.disable(1);
+				if (of !== thing && distance(of) < distance(thing)) mesh.layers.enable(2);
+				else mesh.layers.disable(2);
 			}
 			outline.thing = thing;
 			if (outline.opacity > 0.5) outline.opacity = 0.5;
