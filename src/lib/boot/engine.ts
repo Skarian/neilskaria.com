@@ -79,7 +79,9 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 
 	const scene = new THREE.Scene();
 	scene.background = new THREE.Color('#120f0c');
-	const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.01, 200);
+	// The closest the camera gets is about 0.6 units (diving into the screen), so the near plane can sit
+	// at 0.05; any closer wastes depth precision and small details start to flicker.
+	const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.05, 120);
 	let view = startView(camera.aspect);
 	camera.position.copy(view.eye);
 	camera.lookAt(view.target);
@@ -230,6 +232,15 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			// Only there for Blender previews; the site draws the display itself.
 			object.visible = false;
 		}
+		if (/^Cube(White|Green|Blue|Red|Orange)$/.test(object.material.name)) {
+			// The stickers sit a hair off the cube's body; always draw them in front of it.
+			object.material.polygonOffset = true;
+			object.material.polygonOffsetFactor = -2;
+			object.material.polygonOffsetUnits = -2;
+		}
+		// The cube rests exactly on the tabletop; lift it a hair so its underside doesn't flicker
+		// through the table.
+		if (/^Cube/.test(object.name)) object.position.y += 0.003;
 		if (object.material instanceof THREE.MeshStandardMaterial) live.push(object.material);
 	});
 	screen.material = screenMaterial;
