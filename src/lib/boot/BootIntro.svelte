@@ -477,8 +477,7 @@
 				<span>BARE</span><span>NEAT</span><span>WILD</span>
 			</p>
 			<p class="hint">
-				Slash across the leaves to cut them; tap for a light snip. Drag the trunk, pot or space
-				around to turn the tree (or use two fingers).
+				Slash the leaves to cut them, or tap for a light snip. Drag anywhere else to turn the tree.
 			</p>
 			<div class="actions">
 				<button class="back" onclick={() => engine?.unfocus()}>◀ BACK</button>
