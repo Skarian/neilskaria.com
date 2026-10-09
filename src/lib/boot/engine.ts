@@ -11,10 +11,34 @@ import { introAssets, lightmapScales } from './assets';
 import { bakedMaterial, loadBakedLighting, swayTime, type BakedLighting } from './baked-material';
 import { BOOT_DURATION, drawBootScreen } from './boot-screen';
 import { drawClockLED } from './clock-led';
+import {
+	createRubiks,
+	decodeMove,
+	encodeMove,
+	scrambleMoves,
+	type Axis,
+	type Face,
+	type Move
+} from './rubiks';
 import { createBootSound } from './sound';
 
 export type RoomMode = 'room' | 'booting' | 'site' | 'returning';
 export type Thing = 'sp' | 'cube' | 'clock' | 'lantern' | 'bonsai';
+
+// The Rubik's cube game, as the panel shows it.
+export type CubeState = {
+	// Not solved.
+	scrambled: boolean;
+	// The player's turns since the last scramble, and when the first one was made.
+	moves: number;
+	startedAt: number | null;
+	// How long the player took, once they've solved it.
+	solvedIn: number | null;
+	// Whether this attempt started from a Scramble (so it can count as a best time).
+	timed: boolean;
+	// Scrambling or solving on its own.
+	busy: boolean;
+};
 
 export type RoomOptions = {
 	canvas: HTMLCanvasElement;
@@ -29,6 +53,7 @@ export type RoomOptions = {
 	onMode: (mode: RoomMode) => void;
 	// An object's mini-game has opened (or closed, with null).
 	onFocus: (thing: Thing | null) => void;
+	onCube: (state: CubeState) => void;
 };
 
 export type Room = {
@@ -38,6 +63,8 @@ export type Room = {
 	unfocus: () => void;
 	// The lantern: a colour (any CSS colour) and a brightness from 0 to 1.5.
 	setLantern: (color: string, level: number) => void;
+	scrambleCube: () => void;
+	solveCube: () => void;
 	setMuted: (muted: boolean) => void;
 	dispose: () => void;
 };
@@ -49,6 +76,9 @@ const CAMERA_NEAR = new THREE.Vector3(0.9, 1.9, 6);
 const LANTERN_PAPER = new THREE.Color('#ffa24a').multiplyScalar(1.15);
 // The colour the lantern's bulb was baked with (linear), so other colours can be expressed relative to it.
 const LANTERN_BAKED = new THREE.Color(1.0, 0.62, 0.3);
+const QUARTER = Math.PI / 2;
+// The cube's turns since it was last solved, so it stays as the visitor left it.
+const CUBE_KEY = 'cube-moves';
 
 // Both look down at the tabletop from close by; phones use a wider lens to fit all of it in.
 export function startView(aspect: number) {
@@ -69,7 +99,7 @@ export function startView(aspect: number) {
 }
 
 export async function createRoom(options: RoomOptions): Promise<Room> {
-	const { canvas, layer, background, onProgress, onMode, onFocus } = options;
+	const { canvas, layer, background, onProgress, onMode, onFocus, onCube } = options;
 
 	const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 	renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -130,6 +160,12 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	const floaters: { mesh: THREE.Object3D; thing: Thing; y: number }[] = [];
 	const lantern = { level: 1, color: new THREE.Color().copy(LANTERN_BAKED) };
 	const focusBlend = { value: 0 };
+	// How much the pointer still sways the camera while an object is focused (none for the cube,
+	// where the pointer is busy turning it).
+	let focusSway = 0.2;
+	// The cube: lifted off the table to play with, and a happy hop and spin when it's solved.
+	const cubeLift = { value: 0 };
+	const cubeJoy = { value: 0 };
 	const focusView = { eye: new THREE.Vector3(), target: new THREE.Vector3() };
 	let focused: Thing | null = null;
 	let screenOff = false;
@@ -248,6 +284,67 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		if (object.material instanceof THREE.MeshStandardMaterial) live.push(object.material);
 	});
 	screen.material = screenMaterial;
+
+	// The Rubik's cube is rebuilt as a working puzzle where the modelled one sits, from its materials.
+	const modelled: THREE.Mesh[] = [];
+	gltf.scene.traverse((o) => {
+		if (o instanceof THREE.Mesh && /^Cube/.test((o.material as THREE.Material).name))
+			modelled.push(o);
+	});
+	const partOf = (name: string) =>
+		modelled.find((m) => (m.material as THREE.Material).name === name)!;
+	const bodyBox = new THREE.Box3().setFromObject(partOf('CubeBody'));
+	const cubeCentre = bodyBox.getCenter(new THREE.Vector3());
+	// The pieces' bodies stop just short of the cube's full size.
+	const cubeSize = (bodyBox.max.y - bodyBox.min.y) * (57 / 56.7);
+	// The modelled cube is turned on the table: by how much, from which way its red face points.
+	const faceOffset = (name: string) =>
+		new THREE.Box3().setFromObject(partOf(name)).getCenter(new THREE.Vector3()).sub(cubeCentre);
+	const red = faceOffset('CubeRed');
+	const redAngle = Math.atan2(-red.z, red.x);
+	const cubeYaw = redAngle - Math.round(redAngle / QUARTER) * QUARTER;
+	const stickerMaterials = {} as Record<Face, THREE.Material>;
+	for (const colour of ['White', 'Yellow', 'Green', 'Blue', 'Red', 'Orange']) {
+		const material = partOf(`Cube${colour}`).material as THREE.Material;
+		const o = faceOffset(`Cube${colour}`).applyAxisAngle(new THREE.Vector3(0, 1, 0), -cubeYaw);
+		const axis = dominantAxis(o);
+		material.polygonOffset = true;
+		material.polygonOffsetFactor = -2;
+		material.polygonOffsetUnits = -2;
+		stickerMaterials[`${o.getComponent(axis) > 0 ? '+' : '-'}${'xyz'[axis]}` as Face] = material;
+	}
+	const rubiks = createRubiks({
+		size: cubeSize,
+		body: partOf('CubeBody').material as THREE.Material,
+		stickers: stickerMaterials
+	});
+	rubiks.root.position.copy(cubeCentre);
+	rubiks.root.rotation.y = cubeYaw;
+	gltf.scene.add(rubiks.root);
+	for (const mesh of modelled) mesh.removeFromParent();
+	// Picked up to play with: lifted towards the camera, so it hides its own (baked) shadow on the table.
+	const CUBE_FROM = new THREE.Vector3(0.15, 0.55, 1).normalize();
+	const CUBE_LIFT = CUBE_FROM.clone().multiplyScalar(cubeSize * 2.4);
+
+	// Restore the cube as it was left.
+	let cubeHistory: Move[] = [];
+	try {
+		cubeHistory = (localStorage.getItem(CUBE_KEY) ?? '')
+			.split(' ')
+			.map(decodeMove)
+			.filter((m): m is Move => m !== null);
+	} catch {
+		cubeHistory = [];
+	}
+	for (const move of cubeHistory) rubiks.apply(move);
+	const cube: CubeState = {
+		scrambled: !rubiks.isSolved(),
+		moves: 0,
+		startedAt: null,
+		solvedIn: null,
+		timed: false,
+		busy: false
+	};
 
 	// A thin white outline around whichever object is hovered, like a game's interact highlight. The
 	// hovered object is drawn alone into a mask (on layer 1), and a full-screen pass draws a soft line
@@ -400,6 +497,11 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	canvas.addEventListener('pointermove', pointermove);
 	canvas.addEventListener('pointerleave', pointerleave);
 	canvas.addEventListener('click', click);
+	canvas.addEventListener('pointerdown', pointerdown);
+	canvas.addEventListener('pointerup', pointerup);
+	canvas.addEventListener('pointercancel', pointerup);
+	// Touches turn the cube rather than scroll or zoom anything.
+	canvas.style.touchAction = 'none';
 	onProgress(1);
 
 	function softDot(rgb: string) {
@@ -423,6 +525,12 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			hover.sp * 0.03
 		);
 		for (const f of floaters) f.mesh.position.y = f.y + hover[f.thing] * 0.09;
+		rubiks.root.position.copy(cubeCentre).addScaledVector(CUBE_LIFT, cubeLift.value);
+		rubiks.root.position.y +=
+			hover.cube * 0.09 +
+			cubeLift.value * Math.sin(t * 1.6) * cubeSize * 0.04 +
+			Math.sin(Math.PI * cubeJoy.value) * cubeSize * 0.6;
+		rubiks.root.rotation.y = cubeYaw + cubeJoy.value * Math.PI * 2;
 		lid.rotation.x = -s.open * OPEN;
 		cart.position.copy(cartRest);
 		cart.position.z += s.cartOut * 0.45;
@@ -491,7 +599,9 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	// The direction each object is looked at from when focused (towards the camera), chosen so nothing
 	// stands in front of it; the default is from the front, slightly right and above.
 	const FOCUS_FROM: Partial<Record<Thing, THREE.Vector3>> = {
-		lantern: new THREE.Vector3(-0.62, 0.22, 0.75)
+		lantern: new THREE.Vector3(-0.62, 0.22, 0.75),
+		// From a little above, so the top face shows too.
+		cube: CUBE_FROM
 	};
 
 	function viewOf(thing: Thing) {
@@ -502,9 +612,17 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		const box = new THREE.Box3();
 		for (const o of parts) box.expandByObject(o);
 		const centre = box.getCenter(new THREE.Vector3());
-		const size = box.getSize(new THREE.Vector3()).length();
+		let size = box.getSize(new THREE.Vector3()).length();
+		// The cube is looked at where it's lifted to, whatever it's doing now.
+		if (thing === 'cube') {
+			centre.copy(cubeCentre).add(CUBE_LIFT);
+			size = cubeSize * Math.sqrt(3);
+		}
 		const dir = (FOCUS_FROM[thing] ?? new THREE.Vector3(0.12, 0.22, 1)).clone().normalize();
-		const eye = centre.clone().addScaledVector(dir, size * (camera.aspect > 1 ? 2.1 : 1.85));
+		// The cube is small: further back, so there's room to turn it over.
+		const distance =
+			thing === 'cube' ? (camera.aspect > 1 ? 2.75 : 2.15) : camera.aspect > 1 ? 2.1 : 1.85;
+		const eye = centre.clone().addScaledVector(dir, size * distance);
 		// Aim a little right of the object, so it sits left of centre with the panel beside it.
 		const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), dir).normalize();
 		const target = centre.clone().addScaledVector(right, size * (camera.aspect > 1 ? 0.22 : 0));
@@ -516,6 +634,11 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		if (mode !== 'room' || focused) return;
 		focused = thing;
 		setHovered(null);
+		focusSway = thing === 'cube' ? 0 : 0.2;
+		if (thing === 'cube') {
+			gsap.to(cubeLift, { value: 1, duration: 1.1, ease: 'power3.inOut', overwrite: true });
+			emitCube();
+		}
 		const v = viewOf(thing);
 		focusView.eye.copy(v.eye);
 		focusView.target.copy(v.target);
@@ -525,6 +648,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 
 	function unfocus() {
 		if (!focused) return;
+		if (focused === 'cube') putCubeDown();
 		focused = null;
 		gsap.to(focusBlend, { value: 0, duration: 1.0, ease: 'power3.inOut' });
 		onFocus(null);
@@ -550,8 +674,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			const f = focusBlend.value;
 			const look = new THREE.Vector3().lerpVectors(view.target, FLOAT, s.drift);
 			camera.position.lerpVectors(view.eye, CAMERA_NEAR, s.drift);
-			camera.position.x += parallax.x * 0.35 * calm * (1 - f * 0.8);
-			camera.position.y += parallax.y * 0.2 * calm * (1 - f * 0.8);
+			camera.position.x += parallax.x * 0.35 * calm * (1 - f * (1 - focusSway));
+			camera.position.y += parallax.y * 0.2 * calm * (1 - f * (1 - focusSway));
 			if (f > 0) {
 				camera.position.lerp(focusView.eye, f);
 				look.lerp(focusView.target, f);
@@ -613,13 +737,16 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		computeFinalCamera();
 	}
 
-	function thingAt(event: PointerEvent | MouseEvent): Thing | null {
+	function ndcOf(event: PointerEvent | MouseEvent) {
 		const rect = canvas.getBoundingClientRect();
-		const ndc = new THREE.Vector2(
+		return new THREE.Vector2(
 			((event.clientX - rect.left) / rect.width) * 2 - 1,
 			-((event.clientY - rect.top) / rect.height) * 2 + 1
 		);
-		raycaster.setFromCamera(ndc, camera);
+	}
+
+	function thingAt(event: PointerEvent | MouseEvent): Thing | null {
+		raycaster.setFromCamera(ndcOf(event), camera);
 		const hit = raycaster.intersectObject(gltf.scene, true)[0];
 		// The first thing hit blocks anything behind it.
 		return hit ? thingOf(hit.object) : null;
@@ -642,6 +769,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			((event.clientX - rect.left) / rect.width) * 2 - 1,
 			-((event.clientY - rect.top) / rect.height) * 2 + 1
 		);
+		if (focused === 'cube') return dragCube(event);
 		if (mode !== 'room' || focused) return;
 		setHovered(event.pointerType === 'mouse' ? thingAt(event) : null);
 	}
@@ -683,13 +811,253 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		if (mode !== 'room' || focused) return;
 		const thing = thingAt(event);
 		if (thing === 'sp') return enterSite();
-		if (thing === 'lantern') return focus('lantern');
+		if (thing === 'lantern' || thing === 'cube') return focus(thing);
 		// Not playable yet: a little hop says so.
 		if (thing)
 			gsap
 				.timeline()
 				.to(hover, { [thing]: 2.2, duration: 0.18, ease: 'power2.out' })
 				.to(hover, { [thing]: hovered === thing ? 1 : 0, duration: 0.5, ease: 'bounce.out' });
+	}
+
+	// Playing with the cube. Pressing on it and dragging turns the layer under the pointer, in
+	// whichever direction the drag runs along the face; dragging anywhere else turns the whole cube.
+	type CubeDrag =
+		| { kind: 'orbit'; x: number; y: number }
+		| {
+				kind: 'face';
+				x: number;
+				y: number;
+				point: THREE.Vector3;
+				normal: THREE.Vector3;
+				at: THREE.Vector3;
+		  }
+		| {
+				kind: 'layer';
+				x: number;
+				y: number;
+				axis: Axis;
+				layer: Move['layer'];
+				// The drag's direction on screen that carries the face forwards, and how far is a quarter.
+				along: THREE.Vector2;
+				quarter: number;
+				sign: 1 | -1;
+				progress: number;
+		  };
+	let cubeDrag: CubeDrag | null = null;
+
+	function emitCube() {
+		onCube({ ...cube });
+	}
+
+	function saveCube() {
+		try {
+			localStorage.setItem(CUBE_KEY, cubeHistory.map(encodeMove).join(' '));
+		} catch {
+			// Private browsing, or storage is full: the cube just won't be remembered.
+		}
+	}
+
+	// Records a turn, cancelling it against the last one if it undoes it.
+	function remember(move: Move) {
+		const last = cubeHistory.at(-1);
+		if (last && last.axis === move.axis && last.layer === move.layer && last.dir === -move.dir)
+			cubeHistory.pop();
+		else cubeHistory.push(move);
+		saveCube();
+	}
+
+	function toScreen(point: THREE.Vector3) {
+		const p = point.clone().project(camera);
+		return new THREE.Vector2(((p.x + 1) / 2) * innerWidth, ((1 - p.y) / 2) * innerHeight);
+	}
+
+	function pointerdown(event: PointerEvent) {
+		if (focused !== 'cube' || cube.busy || cubeDrag || mode !== 'room') return;
+		canvas.setPointerCapture(event.pointerId);
+		raycaster.setFromCamera(ndcOf(event), camera);
+		const hit = raycaster.intersectObject(rubiks.root, true)[0];
+		if (!hit?.face) {
+			cubeDrag = { kind: 'orbit', x: event.clientX, y: event.clientY };
+			return;
+		}
+		// The face pressed, in the cube's frame, and which piece it's on.
+		const toCube = rubiks.orbit.getWorldQuaternion(new THREE.Quaternion()).invert();
+		const n = hit.face.normal
+			.clone()
+			.transformDirection(hit.object.matrixWorld)
+			.applyQuaternion(toCube);
+		const axis = dominantAxis(n);
+		const normal = new THREE.Vector3().setComponent(axis, Math.sign(n.getComponent(axis)));
+		const at = hit.object.parent!.position.clone().divideScalar(rubiks.step).round();
+		cubeDrag = { kind: 'face', x: event.clientX, y: event.clientY, point: hit.point, normal, at };
+	}
+
+	function dragCube(event: PointerEvent) {
+		if (!cubeDrag) return;
+		const dx = event.clientX - cubeDrag.x;
+		const dy = event.clientY - cubeDrag.y;
+		if (cubeDrag.kind === 'orbit') {
+			// Turn the cube about the camera's own up and right, like turning it over in your hands.
+			const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+			const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+			const turn = new THREE.Quaternion()
+				.setFromAxisAngle(up, dx * 0.01)
+				.multiply(new THREE.Quaternion().setFromAxisAngle(right, dy * 0.01));
+			// The same turn, in the frame the cube's orientation is kept in.
+			const frame = rubiks.root.getWorldQuaternion(new THREE.Quaternion());
+			rubiks.orbit.quaternion.premultiply(frame.clone().invert().multiply(turn).multiply(frame));
+			cubeDrag.x = event.clientX;
+			cubeDrag.y = event.clientY;
+			return;
+		}
+		if (cubeDrag.kind === 'face') {
+			if (Math.hypot(dx, dy) < 8) return;
+			// Of the two directions along the face, the one the drag follows best on screen.
+			const toWorld = rubiks.orbit.getWorldQuaternion(new THREE.Quaternion());
+			const from = toScreen(cubeDrag.point);
+			let best: { axis: number; screen: THREE.Vector2; fit: number } | null = null;
+			for (let axis = 0; axis < 3; axis++) {
+				if (cubeDrag.normal.getComponent(axis) !== 0) continue;
+				const step = new THREE.Vector3().setComponent(axis, rubiks.step).applyQuaternion(toWorld);
+				const screen = toScreen(cubeDrag.point.clone().add(step)).sub(from);
+				const fit = (screen.x * dx + screen.y * dy) / (screen.length() * Math.hypot(dx, dy) || 1);
+				if (!best || Math.abs(fit) > Math.abs(best.fit)) best = { axis, screen, fit };
+			}
+			if (!best) return;
+			const sign = Math.sign(best.fit) || 1;
+			// Turning about (face normal x drag direction) carries the face along the drag.
+			const r = new THREE.Vector3().crossVectors(
+				cubeDrag.normal,
+				new THREE.Vector3().setComponent(best.axis, sign)
+			);
+			const axis = dominantAxis(r) as Axis;
+			const layer = cubeDrag.at.getComponent(axis) as Move['layer'];
+			rubiks.grab(axis, layer);
+			cubeDrag = {
+				kind: 'layer',
+				x: cubeDrag.x,
+				y: cubeDrag.y,
+				axis,
+				layer,
+				along: best.screen.clone().normalize().multiplyScalar(sign),
+				quarter: Math.max(40, best.screen.length() * 2.2),
+				sign: r.getComponent(axis) > 0 ? 1 : -1,
+				progress: 0
+			};
+		}
+		const progress = THREE.MathUtils.clamp(
+			(dx * cubeDrag.along.x + dy * cubeDrag.along.y) / cubeDrag.quarter,
+			-1,
+			1
+		);
+		cubeDrag.progress = progress;
+		rubiks.setAngle(cubeDrag.sign * progress * QUARTER);
+	}
+
+	async function pointerup() {
+		const drag = cubeDrag;
+		cubeDrag = null;
+		if (drag?.kind !== 'layer') return;
+		// Past about a third of the way, the turn completes.
+		const dir = (Math.abs(drag.progress) > 0.3 ? Math.sign(drag.progress) * drag.sign : 0) as
+			-1 | 0 | 1;
+		cube.busy = true;
+		await rubiks.settle(dir);
+		cube.busy = false;
+		if (dir) playerTurned({ axis: drag.axis, layer: drag.layer, dir });
+		else emitCube();
+	}
+
+	function playerTurned(move: Move) {
+		const wasScrambled = cube.scrambled;
+		remember(move);
+		sound.tick();
+		// The first turn after a solve starts a new (untimed, unless scrambled) attempt.
+		if (cube.solvedIn !== null)
+			Object.assign(cube, { moves: 0, startedAt: null, solvedIn: null, timed: false });
+		cube.moves += 1;
+		cube.startedAt ??= Date.now();
+		cube.scrambled = !rubiks.isSolved();
+		if (wasScrambled && !cube.scrambled) {
+			cube.solvedIn = Date.now() - (cube.startedAt ?? Date.now());
+			cubeHistory = [];
+			saveCube();
+			sound.fanfare();
+			hop();
+		}
+		emitCube();
+	}
+
+	function hop() {
+		gsap.fromTo(cubeJoy, { value: 0 }, { value: 1, duration: 1.1, ease: 'power2.inOut' });
+	}
+
+	async function playMoves(moves: Move[], duration: number) {
+		cube.busy = true;
+		emitCube();
+		for (const move of moves) {
+			if (disposed) return;
+			await rubiks.animate(move, duration, 'power1.inOut');
+			remember(move);
+			sound.tick(0.4);
+		}
+		cube.busy = false;
+	}
+
+	async function scrambleCube() {
+		if (focused !== 'cube' || cube.busy) return;
+		void sound.resume();
+		await playMoves(scrambleMoves(20), 0.09);
+		Object.assign(cube, {
+			scrambled: !rubiks.isSolved(),
+			moves: 0,
+			startedAt: null,
+			solvedIn: null,
+			timed: true
+		});
+		emitCube();
+	}
+
+	// Solving plays every turn since it was last solved backwards, quicker the more there are.
+	async function solveCube() {
+		if (focused !== 'cube' || cube.busy || !cubeHistory.length) return;
+		void sound.resume();
+		const moves = [...cubeHistory].reverse().map((m) => ({ ...m, dir: -m.dir }) as Move);
+		await playMoves(moves, THREE.MathUtils.clamp(5 / moves.length, 0.06, 0.2));
+		cubeHistory = [];
+		saveCube();
+		Object.assign(cube, {
+			scrambled: false,
+			moves: 0,
+			startedAt: null,
+			solvedIn: null,
+			timed: false
+		});
+		emitCube();
+		hop();
+	}
+
+	// Back on the table: the right way up, and down with a little bounce.
+	function putCubeDown() {
+		if (cubeDrag?.kind === 'layer') void rubiks.settle(0);
+		cubeDrag = null;
+		const from = rubiks.orbit.quaternion.clone();
+		const upright = { t: 0 };
+		gsap.to(upright, {
+			t: 1,
+			duration: 0.8,
+			ease: 'power2.inOut',
+			onUpdate: () =>
+				rubiks.orbit.quaternion.slerpQuaternions(from, new THREE.Quaternion(), upright.t)
+		});
+		gsap.to(cubeLift, {
+			value: 0,
+			duration: 0.9,
+			delay: 0.15,
+			ease: 'bounce.out',
+			overwrite: true
+		});
 	}
 
 	// The tweens record their start values when the timeline is built, so it's always built from the
@@ -815,6 +1183,9 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		canvas.removeEventListener('pointermove', pointermove);
 		canvas.removeEventListener('pointerleave', pointerleave);
 		canvas.removeEventListener('click', click);
+		canvas.removeEventListener('pointerdown', pointerdown);
+		canvas.removeEventListener('pointerup', pointerup);
+		canvas.removeEventListener('pointercancel', pointerup);
 		renderer.setAnimationLoop(null);
 		scene.traverse((object) => {
 			if (object instanceof THREE.Mesh || object instanceof THREE.Points) {
@@ -828,6 +1199,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		});
 		envMap.dispose();
 		mask.dispose();
+		rubiks.dispose();
 		screenTexture.dispose();
 		clockTexture.dispose();
 		renderer.dispose();
@@ -836,13 +1208,22 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	}
 
 	setMode(mode);
+	emitCube();
 	return {
 		enterSite,
 		skipToSite,
 		returnToRoom,
 		unfocus,
 		setLantern,
+		scrambleCube: () => void scrambleCube(),
+		solveCube: () => void solveCube(),
 		setMuted: (muted) => sound.setMuted(muted),
 		dispose
 	};
+}
+
+// Which of x, y and z a vector points along most.
+function dominantAxis(v: THREE.Vector3) {
+	const a = [Math.abs(v.x), Math.abs(v.y), Math.abs(v.z)];
+	return a[0] >= a[1] && a[0] >= a[2] ? 0 : a[1] >= a[2] ? 1 : 2;
 }

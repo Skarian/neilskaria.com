@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { Room, RoomMode, Thing } from './engine';
+	import type { CubeState, Room, RoomMode, Thing } from './engine';
 	import { room } from './room.svelte';
 
 	// Panels pop in like a game dialog: from small and tilted, overshooting a touch.
@@ -62,6 +62,55 @@
 	});
 	let engine: Room | undefined;
 
+	// The Rubik's cube: the game's state comes from the room; the best time is kept here.
+	const BEST_KEY = 'cube-best';
+	let cube = $state<CubeState>({
+		scrambled: false,
+		moves: 0,
+		startedAt: null,
+		solvedIn: null,
+		timed: false,
+		busy: false
+	});
+	let best = $state<{ ms: number; moves: number } | null>(null);
+	let newBest = $state(false);
+	let now = $state(Date.now());
+	const elapsed = $derived(
+		cube.solvedIn ?? (cube.startedAt === null ? 0 : Math.max(0, now - cube.startedAt))
+	);
+	// The clock only ticks while an attempt is under way.
+	$effect(() => {
+		if (focused !== 'cube' || cube.startedAt === null || cube.solvedIn !== null) return;
+		const timer = setInterval(() => (now = Date.now()), 100);
+		return () => clearInterval(timer);
+	});
+
+	function onCube(state: CubeState) {
+		if (state.solvedIn !== null && cube.solvedIn === null && state.timed) {
+			newBest = !best || state.solvedIn < best.ms;
+			if (newBest) {
+				best = { ms: state.solvedIn, moves: state.moves };
+				localStorage.setItem(BEST_KEY, JSON.stringify(best));
+			}
+		} else if (state.solvedIn === null) newBest = false;
+		cube = state;
+	}
+
+	function stopwatch(ms: number) {
+		const tenths = Math.floor(ms / 100);
+		const seconds = Math.floor(tenths / 10);
+		return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}.${tenths % 10}`;
+	}
+
+	// Confetti for a solve: scattered pieces in the cube's colours.
+	const CONFETTI = Array.from({ length: 28 }, (_, i) => ({
+		x: Math.round(Math.sin(i * 2.4) * 190),
+		y: -70 - ((i * 37) % 120),
+		spin: (i % 2 ? 1 : -1) * (200 + ((i * 53) % 400)),
+		delay: (i % 7) * 0.03,
+		color: ['#ffffff', '#ffd500', '#009b48', '#0046ad', '#b71234', '#ff5800'][i % 6]
+	}));
+
 	function show() {
 		document.documentElement.dataset.intro = 'play';
 		// No page scrolling (or scrollbar) while the room covers the page.
@@ -83,7 +132,8 @@
 			startIn,
 			onProgress: (value) => (progress = value),
 			onMode,
-			onFocus: (thing) => (focused = thing)
+			onFocus: (thing) => (focused = thing),
+			onCube
 		});
 		engine.setLantern(lanternColor, lanternLevel);
 	}
@@ -140,6 +190,11 @@
 
 	onMount(() => {
 		muted = localStorage.getItem(MUTED_KEY) === '1';
+		try {
+			best = JSON.parse(localStorage.getItem(BEST_KEY) ?? 'null');
+		} catch {
+			best = null;
+		}
 		const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 		// A first visit, or a reload while in the room, starts in the room.
 		const inRoom = sessionStorage.getItem(PLACE_KEY) === 'room';
@@ -247,6 +302,68 @@
 					}}>↺ RESET</button
 				>
 			</div>
+		</aside>
+	{/if}
+
+	{#if focused === 'cube'}
+		<aside
+			class="panel"
+			aria-label="Rubik's cube"
+			in:pop={{ delay: 350 }}
+			out:pop={{ duration: 220 }}
+		>
+			<p class="ribbon cube-ribbon">CUBE</p>
+			{#key cube.solvedIn !== null}
+				<h2 class:cheer={cube.solvedIn !== null}>
+					{cube.solvedIn !== null ? 'Solved!' : cube.scrambled ? 'Solve it!' : 'Mix it up!'}
+				</h2>
+			{/key}
+			<dl class="stats">
+				<div>
+					<dt>MOVES</dt>
+					<dd>{cube.moves}</dd>
+				</div>
+				<div>
+					<dt>TIME</dt>
+					<dd>{stopwatch(elapsed)}</dd>
+				</div>
+				<div>
+					<dt>BEST</dt>
+					<dd>{best ? stopwatch(best.ms) : '-:--'}</dd>
+				</div>
+			</dl>
+			{#if newBest}
+				<p class="badge">NEW BEST!</p>
+			{/if}
+			<p class="hint">
+				{cube.scrambled
+					? 'Drag a face to turn it. Drag around the cube to turn it over.'
+					: 'Scramble it, then race the clock to solve it.'}
+			</p>
+			<div class="actions">
+				<button class="back" onclick={() => engine?.unfocus()}>◀ BACK</button>
+				<button class="back go" onclick={() => engine?.scrambleCube()} disabled={cube.busy}
+					>SCRAMBLE</button
+				>
+				<button
+					class="back reset"
+					onclick={() => engine?.solveCube()}
+					disabled={cube.busy || !cube.scrambled}>SOLVE</button
+				>
+			</div>
+			{#if cube.solvedIn !== null}
+				<div class="confetti" aria-hidden="true">
+					{#each CONFETTI as c, i (i)}
+						<i
+							style:--x="{c.x}px"
+							style:--y="{c.y}px"
+							style:--spin="{c.spin}deg"
+							style:--delay="{c.delay}s"
+							style:background={c.color}
+						></i>
+					{/each}
+				</div>
+			{/if}
 		</aside>
 	{/if}
 
@@ -524,6 +641,132 @@
 		cursor: pointer;
 	}
 
+	.cube-ribbon {
+		background: #4f8fe8;
+	}
+
+	.panel h2.cheer {
+		animation: cheer 0.6s cubic-bezier(0.3, 1.8, 0.5, 1) both;
+	}
+
+	/* Moves, time and best, like a game's score readout. */
+	.stats {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 0.5rem;
+		width: 100%;
+	}
+
+	.stats div {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.15rem;
+		padding: 0.45rem 0.2rem;
+		border: 3px solid var(--ink);
+		border-radius: 14px;
+		background: #fffaf0;
+		box-shadow: inset 0 -3px 0 rgb(0 0 0 / 0.08);
+	}
+
+	.stats dt {
+		font-size: 0.6rem;
+		letter-spacing: 0.15em;
+		opacity: 0.7;
+	}
+
+	.stats dd {
+		font-family: 'Arial Black', 'Helvetica Neue', Arial, sans-serif;
+		font-size: 1rem;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.badge {
+		margin-top: -0.3rem;
+		padding: 0.15rem 0.7rem;
+		border: 3px solid var(--ink);
+		border-radius: 999px;
+		background: #ffd94a;
+		font-family: 'Arial Black', 'Helvetica Neue', Arial, sans-serif;
+		font-style: italic;
+		font-size: 0.7rem;
+		letter-spacing: 0.12em;
+		box-shadow: 0 3px 0 var(--ink);
+		animation: cheer 0.6s 0.15s cubic-bezier(0.3, 1.8, 0.5, 1) both;
+	}
+
+	.hint {
+		font-size: 0.72rem;
+		line-height: 1.45;
+		text-align: center;
+		opacity: 0.8;
+	}
+
+	.actions .go {
+		background: #ff8f5a;
+	}
+
+	.panel:has(.stats) .actions {
+		gap: 0.45rem;
+	}
+
+	.panel:has(.stats) {
+		width: min(21.5rem, calc(100vw - 2rem));
+	}
+
+	.panel:has(.stats) .back {
+		padding-inline: 0.9rem;
+		white-space: nowrap;
+	}
+
+	.back:disabled {
+		opacity: 0.45;
+		cursor: default;
+		translate: 0 0;
+		box-shadow: 0 4px 0 var(--ink);
+	}
+
+	.confetti {
+		position: absolute;
+		left: 50%;
+		top: 0;
+		pointer-events: none;
+	}
+
+	.confetti i {
+		position: absolute;
+		width: 0.5rem;
+		height: 0.8rem;
+		border: 2px solid var(--ink);
+		border-radius: 2px;
+		opacity: 0;
+		animation: confetti 1.3s var(--delay) cubic-bezier(0.2, 0.7, 0.4, 1) both;
+	}
+
+	@keyframes confetti {
+		0% {
+			opacity: 1;
+			translate: 0 0;
+			rotate: 0deg;
+		}
+		35% {
+			opacity: 1;
+			translate: var(--x) var(--y);
+		}
+		100% {
+			opacity: 0;
+			translate: calc(var(--x) * 1.3) calc(var(--y) + 220px);
+			rotate: var(--spin);
+		}
+	}
+
+	@keyframes cheer {
+		from {
+			scale: 0.4;
+			rotate: -8deg;
+		}
+	}
+
 	.name {
 		margin-top: -0.2rem;
 		font-size: 0.78rem;
@@ -624,8 +867,15 @@
 	@media (prefers-reduced-motion: reduce) {
 		.swatches button,
 		.gem,
-		.swatches button[aria-checked='true']::after {
+		.swatches button[aria-checked='true']::after,
+		.panel h2.cheer,
+		.badge,
+		.confetti {
 			animation: none;
+		}
+
+		.confetti {
+			display: none;
 		}
 	}
 

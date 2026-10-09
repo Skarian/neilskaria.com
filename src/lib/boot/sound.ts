@@ -44,6 +44,27 @@ export async function createBootSound(chimeUrl: string, muted = false) {
 			source.connect(gain).connect(master);
 			source.start();
 		},
+		// The clack of a cube layer snapping round: a short burst of noise, filtered to sound plasticky.
+		tick(volume = 0.8) {
+			const length = Math.floor(ctx.sampleRate * 0.05);
+			const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+			const data = buffer.getChannelData(0);
+			for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length) ** 6;
+			const source = ctx.createBufferSource();
+			const filter = ctx.createBiquadFilter();
+			filter.type = 'bandpass';
+			filter.frequency.value = 1800 + Math.random() * 600;
+			filter.Q.value = 1.4;
+			const gain = ctx.createGain();
+			gain.gain.value = volume;
+			source.buffer = buffer;
+			source.connect(filter).connect(gain).connect(master);
+			source.start();
+		},
+		// A little rising arpeggio for solving the cube.
+		fanfare() {
+			[523.25, 659.25, 783.99, 1046.5].forEach((f, i) => bell(ctx, master, f, i * 0.09, 0.8));
+		},
 		close: () => ctx.close()
 	};
 }
