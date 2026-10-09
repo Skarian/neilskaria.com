@@ -86,6 +86,26 @@ export async function createBootSound(chimeUrl: string, muted = false) {
 				source.start(at);
 			}
 		},
+		// A slash through the bonsai: a quick swish, sweeping down, with the clack of the blades.
+		slash(strength = 1) {
+			const length = Math.floor(ctx.sampleRate * 0.14);
+			const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+			const data = buffer.getChannelData(0);
+			for (let i = 0; i < length; i++)
+				data[i] = (Math.random() * 2 - 1) * Math.sin((Math.PI * i) / length) ** 2;
+			const source = ctx.createBufferSource();
+			const filter = ctx.createBiquadFilter();
+			filter.type = 'bandpass';
+			filter.Q.value = 1.2;
+			const now = ctx.currentTime;
+			filter.frequency.setValueAtTime(4200, now);
+			filter.frequency.exponentialRampToValueAtTime(1400, now + 0.14);
+			const gain = ctx.createGain();
+			gain.gain.value = 0.35 * strength;
+			source.buffer = buffer;
+			source.connect(filter).connect(gain).connect(master);
+			source.start();
+		},
 		// Water from a watering can: a soft rush of filtered noise.
 		pour() {
 			const length = Math.floor(ctx.sampleRate * 1.5);

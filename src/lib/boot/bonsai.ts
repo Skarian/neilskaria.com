@@ -1,160 +1,488 @@
-// The bonsai as something to look after: its foliage is ~7,000 little tufts of needles, and each tuft
-// has a length, from a trimmed stub to shaggy overgrowth. Trimming shortens the tufts under the
-// scissors a little at a time; the tree grows back slowly while the visitor is away, unevenly and
-// fastest at the top, like the real thing. Lengths live in a small texture the needles' shader reads,
-// so changing them costs next to nothing.
+// The bonsai as something to look after. The trunk, branches and pot come from the room's model; the
+// foliage is grown here: twigs reaching from the branches into each pad, and on them juniper shoots,
+// each a chain of little nodes of needles running from a twig out to its tip. A shoot's state is
+// how far out it reaches (in nodes): cutting sets that to where the cut crossed it, and it grows
+// back out from there, past its neat length if it's left. The whole tree sits on a turntable and is
+// lit live (rather than baked), so it can be turned all the way round.
 
 import * as THREE from 'three';
-import { tuftLengths } from './baked-material';
+import { swayTime } from './baked-material';
 
-// Shortest a tuft can be trimmed to, its neat length, and the most it overgrows.
-export const STUB = 0.3;
-export const NEAT = 1;
-export const SHAGGY = 1.6;
-// Growth per day, on average (so about a week from neat to shaggy).
-const GROWTH_PER_DAY = 0.08;
-const KEY = 'bonsai';
-const WIDTH = 128;
+const KEY = 'bonsai-shoots';
+// The model's units: props.py works in millimetres, at 0.01 units each (before the tree's own scale).
+const MM = 0.01;
+const WIDTH = 64;
+// Regrowth, in nodes a day: back to neat after a couple of days, then slower, outwards.
+const REGROW = 3;
+const OVERGROW = 0.9;
 
-export function createBonsai(needles: THREE.Mesh[]) {
-	// Each needle is one triangle; a tuft is the six needles sharing a lightmap cell. The tip of each
-	// needle (the corner opposite its short base) moves along the needle as the tuft grows and shrinks.
-	const keys = new Map<string, number>();
-	const perMesh: { mesh: THREE.Mesh; tuftOf: Uint32Array }[] = [];
-	for (const mesh of needles) {
-		const geometry = mesh.geometry;
-		const uv1 = geometry.attributes.uv1;
-		const triangles = geometry.attributes.position.count / 3;
-		const tuftOf = new Uint32Array(triangles);
-		for (let t = 0; t < triangles; t++) {
-			let u = 0;
-			let v = 0;
-			for (let k = 0; k < 3; k++) {
-				u += uv1.getX(t * 3 + k);
-				v += uv1.getY(t * 3 + k);
+// The foliage pads, as in props.py: centre and half-sizes in millimetres (x right, y back, z up), and
+// how many shoots fill each.
+const PADS: { centre: [number, number, number]; size: [number, number, number]; shoots: number }[] =
+	[
+		{ centre: [19, 0, 214], size: [78, 55, 38], shoots: 320 }, // the crown
+		{ centre: [-72, 6, 185], size: [47, 40, 28], shoots: 150 }, // left
+		{ centre: [62, -4, 134], size: [70, 48, 34], shoots: 280 }, // the big pad cascading right
+		{ centre: [110, 4, 160], size: [34, 30, 20], shoots: 80 }, // its upper-right shoulder
+		{ centre: [10, 46, 200], size: [36, 26, 20], shoots: 80 } // back, for depth
+	];
+
+// Juniper greens (linear), as the old needles had, and the paler green of new growth.
+const GREENS = [
+	new THREE.Color(0.042, 0.13, 0.06),
+	new THREE.Color(0.075, 0.21, 0.09),
+	new THREE.Color(0.13, 0.3, 0.15),
+	new THREE.Color(0.07, 0.2, 0.15)
+];
+const NEW_GROWTH = new THREE.Color(0.2, 0.4, 0.12);
+
+export type Shoot = {
+	// Where it starts (on a twig) and its nodes, in the turntable's space.
+	hub: THREE.Vector3;
+	nodes: THREE.Vector3[];
+	neat: number;
+	// The first triangle of each node in the foliage geometry (and one past the last).
+	triangles: number[];
+};
+
+export function createBonsai(root: THREE.Object3D, lengthsUniform: { value: THREE.Texture }) {
+	const random = mulberry32(11);
+	const rand = (a = 0, b = 1) => a + (b - a) * random();
+
+	// The old, fixed foliage goes; the new foliage replaces it.
+	const old: THREE.Object3D[] = [];
+	root.traverse((o) => {
+		if (/^Bonsai(Needle|Core)/.test(o.name)) old.push(o);
+	});
+	for (const o of old) o.removeFromParent();
+
+	const wood = root.getObjectByName('BonsaiWood') as THREE.Mesh;
+	const pot = root.getObjectByName('BonsaiPot') as THREE.Mesh;
+	root.updateMatrixWorld(true);
+
+	// The turntable: everything but the slate it stands on turns about the pot's centre.
+	const potBox = new THREE.Box3().setFromObject(pot);
+	const turntable = new THREE.Group();
+	turntable.name = 'BonsaiTurntable';
+	turntable.position.set(
+		(potBox.min.x + potBox.max.x) / 2,
+		potBox.min.y,
+		(potBox.min.z + potBox.max.z) / 2
+	);
+	root.add(turntable);
+	turntable.updateMatrixWorld();
+	const onTurntable = new Set<THREE.Object3D>();
+	root.traverse((o) => {
+		if (o === turntable || !/^Bonsai/.test(o.name) || /Slate/.test(o.name)) return;
+		let top = o;
+		while (top.parent && top.parent !== root) top = top.parent;
+		if (top !== turntable) onTurntable.add(top);
+	});
+	for (const o of onTurntable) turntable.attach(o);
+	turntable.updateMatrixWorld(true);
+
+	// Lit live, so they can turn: the same colours and textures, now under the room's light.
+	const materials: THREE.MeshStandardMaterial[] = [];
+	turntable.traverse((o) => {
+		if (!(o instanceof THREE.Mesh)) return;
+		const baked = o.material as THREE.MeshBasicMaterial;
+		const material = new THREE.MeshStandardMaterial({
+			map: baked.map,
+			color: baked.color,
+			roughness: 0.85,
+			side: baked.side
+		});
+		o.material = material;
+		materials.push(material);
+	});
+
+	// From the model's millimetres (Blender axes) into the turntable's space.
+	const fromModel = new THREE.Matrix4()
+		.copy(turntable.matrixWorld)
+		.invert()
+		.multiply(wood.matrixWorld)
+		.multiply(new THREE.Matrix4().set(MM, 0, 0, 0, 0, 0, MM, 0, 0, -MM, 0, 0, 0, 0, 0, 1));
+	const normalFromModel = new THREE.Matrix3().getNormalMatrix(fromModel);
+	const toModel = new THREE.Matrix4().copy(fromModel).invert();
+	const local = (v: THREE.Vector3) => v.clone().applyMatrix4(fromModel);
+
+	// The branches' surface, in millimetres, for twigs to grow from.
+	const woodPoints: THREE.Vector3[] = [];
+	{
+		const position = wood.geometry.attributes.position;
+		const woodToModel = new THREE.Matrix4()
+			.copy(toModel)
+			.multiply(new THREE.Matrix4().copy(turntable.matrixWorld).invert())
+			.multiply(wood.matrixWorld);
+		for (let i = 0; i < position.count; i += 3)
+			woodPoints.push(
+				new THREE.Vector3().fromBufferAttribute(position, i).applyMatrix4(woodToModel)
+			);
+	}
+	const nearestWood = (to: THREE.Vector3) => {
+		let best = woodPoints[0];
+		let d = Infinity;
+		for (const p of woodPoints) {
+			const dd = p.distanceToSquared(to);
+			if (dd < d) {
+				d = dd;
+				best = p;
 			}
-			const key = `${Math.round((u / 3) * 65536)},${Math.round((v / 3) * 65536)}`;
-			if (!keys.has(key)) keys.set(key, keys.size);
-			tuftOf[t] = keys.get(key)!;
 		}
-		perMesh.push({ mesh, tuftOf });
-	}
-	// Tufts are numbered in a fixed order (by lightmap cell), so saved lengths match up next time.
-	const order = [...keys.keys()].sort();
-	const renumber = new Uint32Array(order.length);
-	order.forEach((key, i) => (renumber[keys.get(key)!] = i));
-	const count = order.length;
+		return best.clone();
+	};
 
-	// Where each tuft is (world space, for the scissors and falling clippings), and how fast it grows.
-	const centres = new Float32Array(count * 3);
-	const tally = new Uint16Array(count);
-	const a = new THREE.Vector3();
-	const b = new THREE.Vector3();
-	const c = new THREE.Vector3();
-	const root = new THREE.Vector3();
-	for (const { mesh, tuftOf } of perMesh) {
-		mesh.updateMatrixWorld(true);
-		const geometry = mesh.geometry;
-		const position = geometry.attributes.position;
-		const roots = new Float32Array(position.count * 3);
-		const axes = new Float32Array(position.count * 3);
-		const ids = new Float32Array(position.count);
-		const tips = new Float32Array(position.count);
-		for (let t = 0; t < tuftOf.length; t++) {
-			const id = renumber[tuftOf[t]];
-			tuftOf[t] = id;
-			a.fromBufferAttribute(position, t * 3);
-			b.fromBufferAttribute(position, t * 3 + 1);
-			c.fromBufferAttribute(position, t * 3 + 2);
-			// The tip is the corner opposite the shortest edge.
-			const ab = a.distanceToSquared(b);
-			const bc = b.distanceToSquared(c);
-			const ca = c.distanceToSquared(a);
-			const tip = ab <= bc && ab <= ca ? 2 : bc <= ca ? 0 : 1;
-			const [p, q] = [a, b, c].filter((_, k) => k !== tip);
-			root.addVectors(p, q).multiplyScalar(0.5);
-			const tipAt = [a, b, c][tip];
-			for (let k = 0; k < 3; k++) {
-				const i = t * 3 + k;
-				roots.set([root.x, root.y, root.z], i * 3);
-				axes.set([tipAt.x - root.x, tipAt.y - root.y, tipAt.z - root.z], i * 3);
-				ids[i] = id;
-				tips[i] = k === tip ? 1 : 0;
+	// Twigs: tapered tubes, fixed (only the shoots on them can be cut).
+	const twig = { position: [] as number[], normal: [] as number[] };
+	function tube(points: THREE.Vector3[], r0: number, r1: number) {
+		const curve = new THREE.CatmullRomCurve3(points);
+		const steps = 8;
+		const sides = 6;
+		const frames = curve.computeFrenetFrames(steps, false);
+		const rings: { p: THREE.Vector3; n: THREE.Vector3 }[][] = [];
+		for (let i = 0; i <= steps; i++) {
+			const t = i / steps;
+			const centre = curve.getPointAt(t);
+			const r = THREE.MathUtils.lerp(r0, r1, t);
+			const ring = [];
+			for (let k = 0; k < sides; k++) {
+				const a = (k / sides) * Math.PI * 2;
+				const n = frames.normals[i]
+					.clone()
+					.multiplyScalar(Math.cos(a))
+					.addScaledVector(frames.binormals[i], Math.sin(a));
+				ring.push({ p: centre.clone().addScaledVector(n, r), n });
 			}
-			root.applyMatrix4(mesh.matrixWorld);
-			centres[id * 3] += root.x;
-			centres[id * 3 + 1] += root.y;
-			centres[id * 3 + 2] += root.z;
-			tally[id] += 1;
+			rings.push(ring);
 		}
-		geometry.setAttribute('needleRoot', new THREE.BufferAttribute(roots, 3));
-		geometry.setAttribute('needleAxis', new THREE.BufferAttribute(axes, 3));
-		geometry.setAttribute('tuftId', new THREE.BufferAttribute(ids, 1));
-		geometry.setAttribute('needleTip', new THREE.BufferAttribute(tips, 1));
-	}
-	let lowest = Infinity;
-	let highest = -Infinity;
-	for (let id = 0; id < count; id++) {
-		for (let k = 0; k < 3; k++) centres[id * 3 + k] /= Math.max(1, tally[id]);
-		lowest = Math.min(lowest, centres[id * 3 + 1]);
-		highest = Math.max(highest, centres[id * 3 + 1]);
-	}
-	// Uneven growth: each tuft its own pace, and the top of the tree fastest.
-	const pace = new Float32Array(count);
-	for (let id = 0; id < count; id++) {
-		const height = (centres[id * 3 + 1] - lowest) / (highest - lowest || 1);
-		const noise = Math.abs(Math.sin(id * 12.9898) * 43758.5453) % 1;
-		pace[id] = 0.45 + 0.7 * noise + 0.6 * height;
+		for (let i = 0; i < steps; i++)
+			for (let k = 0; k < sides; k++) {
+				const a = rings[i][k];
+				const b = rings[i][(k + 1) % sides];
+				const c = rings[i + 1][(k + 1) % sides];
+				const d = rings[i + 1][k];
+				for (const v of [a, b, c, a, c, d]) {
+					const p = v.p.clone().applyMatrix4(fromModel);
+					const n = v.n.clone().applyMatrix3(normalFromModel).normalize();
+					twig.position.push(p.x, p.y, p.z);
+					twig.normal.push(n.x, n.y, n.z);
+				}
+			}
 	}
 
+	// The shoots' foliage, built node by node so a node's triangles sit together.
+	const leaf = {
+		position: [] as number[],
+		normal: [] as number[],
+		color: [] as number[],
+		shoot: [] as number[],
+		node: [] as number[],
+		anchor: [] as number[]
+	};
+	const shoots: Shoot[] = [];
+	const triangleCount = () => leaf.position.length / 9;
+
+	const up = new THREE.Vector3(0, 0, 1);
+	for (const pad of PADS) {
+		const c = new THREE.Vector3(...pad.centre);
+		const r = new THREE.Vector3(...pad.size);
+		// A twig from the nearest branch up into the pad (which also joins up any pad left floating),
+		// then forking to a few hubs inside it.
+		const base = c.clone().add(new THREE.Vector3(0, 0, -r.z * 0.35));
+		const from = nearestWood(c.clone().add(new THREE.Vector3(0, 0, -r.z * 0.9)));
+		const span = from.distanceTo(base);
+		tube(
+			[
+				from,
+				from
+					.clone()
+					.lerp(base, 0.5)
+					.add(new THREE.Vector3(0, 0, span * 0.15)),
+				base
+			],
+			2.6,
+			1.5
+		);
+		const hubs: THREE.Vector3[] = [];
+		const hubCount = THREE.MathUtils.clamp(Math.round(pad.shoots / 22), 3, 8);
+		for (let h = 0; h < hubCount; h++) {
+			const hub = base
+				.clone()
+				.add(
+					new THREE.Vector3(
+						rand(-1, 1) * r.x * 0.5,
+						rand(-1, 1) * r.y * 0.5,
+						rand(-0.2, 0.35) * r.z
+					)
+				);
+			tube(
+				[
+					base,
+					base
+						.clone()
+						.lerp(hub, 0.5)
+						.add(new THREE.Vector3(0, 0, 2)),
+					hub
+				],
+				1.5,
+				0.7
+			);
+			hubs.push(hub);
+		}
+
+		for (let i = 0; i < pad.shoots; i++) {
+			// Each shoot reaches from a hub to a point on the pad's outline: mostly the top and sides.
+			const theta = rand(0, Math.PI * 2);
+			const phi = Math.acos(THREE.MathUtils.clamp(1 - 1.8 * Math.pow(random(), 1.4), -1, 1));
+			const n = new THREE.Vector3(
+				Math.sin(phi) * Math.cos(theta),
+				Math.sin(phi) * Math.sin(theta),
+				Math.cos(phi)
+			);
+			const tip = c.clone().add(n.clone().multiply(r).multiplyScalar(rand(0.92, 1.03)));
+			const hub = hubs.reduce((a, b) =>
+				b.distanceToSquared(tip) < a.distanceToSquared(tip) ? b : a
+			);
+			const span = hub.distanceTo(tip);
+			const curve = new THREE.QuadraticBezierCurve3(
+				hub,
+				hub
+					.clone()
+					.lerp(tip, 0.5)
+					.addScaledVector(up, span * 0.15),
+				tip
+			);
+			const neat = Math.max(2, Math.round(span / 5.5));
+			const nodes: THREE.Vector3[] = [];
+			for (let k = 1; k <= neat; k++) nodes.push(curve.getPointAt(k / neat));
+			// Past its neat length it keeps going: leggy new growth, curling outwards and up.
+			let heading = curve.getTangentAt(1).add(n.clone().multiplyScalar(0.6)).normalize();
+			const extra = 5 + Math.floor(rand(0, 3));
+			for (let k = 0; k < extra; k++) {
+				heading = heading
+					.clone()
+					.add(new THREE.Vector3(rand(-0.25, 0.25), rand(-0.25, 0.25), rand(-0.05, 0.3)))
+					.normalize();
+				nodes.push(nodes[nodes.length - 1].clone().addScaledVector(heading, 6.5));
+			}
+
+			const shootId = shoots.length;
+			const green = GREENS[weighted(random(), [2, 4, 3, 2])];
+			const triangles: number[] = [];
+			const along = new THREE.Vector3();
+			for (let k = 0; k < nodes.length; k++) {
+				triangles.push(triangleCount());
+				const p = nodes[k];
+				const prev = k === 0 ? hub : nodes[k - 1];
+				along.subVectors(p, prev).normalize();
+				const grown = k >= neat;
+				// Shading: darker deep inside the pad and underneath it.
+				const e = p.clone().sub(c).divide(r);
+				const depth = Math.min(1, e.length());
+				let shade = grown ? 1 : 0.35 + 0.65 * THREE.MathUtils.smoothstep(depth, 0.2, 1);
+				if (!grown && p.z < c.z) shade *= 0.75;
+				const colour = (
+					grown ? green.clone().lerp(NEW_GROWTH, Math.min(1, (k - neat + 1) / 3)) : green
+				)
+					.clone()
+					.multiplyScalar(shade);
+				// The foliage is lit as if round: its normal points out from the pad's centre.
+				const out = e.lengthSq() > 1e-6 ? e.clone().divide(r).normalize() : up.clone();
+				const normal = out.lerp(up, 0.3).normalize();
+				const add = (v: THREE.Vector3) => {
+					const q = v.clone().applyMatrix4(fromModel);
+					const nn = normal.clone().applyMatrix3(normalFromModel).normalize();
+					const a = prev.clone().applyMatrix4(fromModel);
+					leaf.position.push(q.x, q.y, q.z);
+					leaf.normal.push(nn.x, nn.y, nn.z);
+					leaf.color.push(colour.r, colour.g, colour.b);
+					leaf.shoot.push(shootId);
+					leaf.node.push(k);
+					leaf.anchor.push(a.x, a.y, a.z);
+				};
+				// The stem from the last node to this one.
+				const side = along.clone().cross(up).normalize().multiplyScalar(0.35);
+				if (side.lengthSq() < 1e-6) side.set(0.35, 0, 0);
+				for (const v of [
+					prev.clone().add(side),
+					prev.clone().sub(side),
+					p.clone().sub(side),
+					prev.clone().add(side),
+					p.clone().sub(side),
+					p.clone().add(side)
+				])
+					add(v);
+				// Its needles: a spray fanning forward and outward.
+				// A dense little cluster, fuller inside the pad; new growth is sparser.
+				const sprays = grown ? 6 : 11;
+				for (let j = 0; j < sprays; j++) {
+					const d = along
+						.clone()
+						.multiplyScalar(0.45)
+						.addScaledVector(out, 0.45)
+						.add(new THREE.Vector3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(0.9))
+						.normalize();
+					const length = rand(4.5, 7.5);
+					const root = p.clone().addScaledVector(along, rand(-4, 0.5));
+					let perp = d.clone().cross(out);
+					perp = perp.lengthSq() > 1e-6 ? perp.normalize() : side.clone().normalize();
+					add(root.clone().addScaledVector(perp, 0.7));
+					add(root.clone().addScaledVector(perp, -0.7));
+					add(root.clone().addScaledVector(d, length));
+				}
+			}
+			triangles.push(triangleCount());
+			shoots.push({
+				hub: local(hub),
+				nodes: nodes.map(local),
+				neat,
+				triangles
+			});
+		}
+	}
+
+	// How far each shoot reaches, in nodes: one texel each, read by the foliage's shader.
+	const count = shoots.length;
 	const rows = Math.ceil(count / WIDTH);
-	const lengths = new Float32Array(WIDTH * rows).fill(NEAT);
+	const lengths = new Float32Array(WIDTH * rows);
+	for (let s = 0; s < count; s++) lengths[s] = shoots[s].neat;
 	const texture = new THREE.DataTexture(lengths, WIDTH, rows, THREE.RedFormat, THREE.FloatType);
 	texture.needsUpdate = true;
-	tuftLengths.value = texture;
+	lengthsUniform.value = texture;
+	// Uneven growth: each shoot its own pace, the top of the tree fastest.
+	const pace = new Float32Array(count);
+	let lowest = Infinity;
+	let highest = -Infinity;
+	for (const s of shoots) {
+		lowest = Math.min(lowest, s.hub.y);
+		highest = Math.max(highest, s.hub.y);
+	}
+	for (let s = 0; s < count; s++) {
+		const height = (shoots[s].hub.y - lowest) / (highest - lowest || 1);
+		pace[s] = 0.5 + 0.6 * random() + 0.5 * height;
+	}
+
+	const foliageGeometry = new THREE.BufferGeometry();
+	foliageGeometry.setAttribute('position', new THREE.Float32BufferAttribute(leaf.position, 3));
+	foliageGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(leaf.normal, 3));
+	foliageGeometry.setAttribute('color', new THREE.Float32BufferAttribute(leaf.color, 3));
+	foliageGeometry.setAttribute('shootId', new THREE.Float32BufferAttribute(leaf.shoot, 1));
+	foliageGeometry.setAttribute('node', new THREE.Float32BufferAttribute(leaf.node, 1));
+	foliageGeometry.setAttribute('anchor', new THREE.Float32BufferAttribute(leaf.anchor, 3));
+	const foliageMaterial = new THREE.MeshStandardMaterial({
+		vertexColors: true,
+		side: THREE.DoubleSide,
+		roughness: 0.8
+	});
+	foliageMaterial.onBeforeCompile = (shader) => {
+		shader.uniforms.shootLengths = lengthsUniform;
+		shader.uniforms.swayTime = swayTime;
+		shader.vertexShader = shader.vertexShader
+			.replace(
+				'#include <common>',
+				`#include <common>
+				uniform sampler2D shootLengths;
+				uniform float swayTime;
+				attribute float shootId;
+				attribute float node;
+				attribute vec3 anchor;`
+			)
+			.replace(
+				'#include <begin_vertex>',
+				`#include <begin_vertex>
+				// A node shows once its shoot reaches it, growing out from the node before it.
+				int id = int( shootId + 0.5 );
+				int width = textureSize( shootLengths, 0 ).x;
+				float reach = texelFetch( shootLengths, ivec2( id % width, id / width ), 0 ).r;
+				transformed = anchor + ( transformed - anchor ) * clamp( reach - node, 0.0, 1.0 );
+				// A very gentle sway, more towards the top.
+				float high = smoothstep( 0.9, 1.6, position.y );
+				transformed.x += high * sin( swayTime * 0.9 + position.x * 25.0 ) * 0.004;
+				transformed.z += high * cos( swayTime * 0.7 + position.z * 21.0 ) * 0.003;`
+			);
+	};
+	foliageMaterial.customProgramCacheKey = () => 'bonsai-shoots';
+	const foliage = new THREE.Mesh(foliageGeometry, foliageMaterial);
+	foliage.name = 'BonsaiShoots';
+	foliage.frustumCulled = false;
+	turntable.add(foliage);
+
+	const twigGeometry = new THREE.BufferGeometry();
+	twigGeometry.setAttribute('position', new THREE.Float32BufferAttribute(twig.position, 3));
+	twigGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(twig.normal, 3));
+	const twigMaterial = new THREE.MeshStandardMaterial({ color: '#4a3324', roughness: 0.9 });
+	const twigs = new THREE.Mesh(twigGeometry, twigMaterial);
+	twigs.name = 'BonsaiTwigs';
+	turntable.add(twigs);
+	materials.push(foliageMaterial, twigMaterial);
+
+	// Cut clumps of foliage fall as copies of the nodes they were, lit the same way.
+	const clumpMaterial = new THREE.MeshStandardMaterial({
+		vertexColors: true,
+		side: THREE.DoubleSide,
+		roughness: 0.8
+	});
+	materials.push(clumpMaterial);
+
+	// The nodes from `from` up to the shoot's current reach, as a mesh in world space.
+	function clump(s: number, from: number) {
+		const shoot = shoots[s];
+		const to = Math.min(shoot.nodes.length, Math.ceil(lengths[s]));
+		if (to <= from) return null;
+		const t0 = shoot.triangles[from];
+		const t1 = shoot.triangles[to];
+		const geometry = new THREE.BufferGeometry();
+		for (const name of ['position', 'normal', 'color']) {
+			const source = foliageGeometry.attributes[name] as THREE.BufferAttribute;
+			geometry.setAttribute(name, new THREE.BufferAttribute(source.array.slice(t0 * 9, t1 * 9), 3));
+		}
+		turntable.updateMatrixWorld();
+		geometry.applyMatrix4(turntable.matrixWorld);
+		geometry.computeBoundingBox();
+		const centre = geometry.boundingBox!.getCenter(new THREE.Vector3());
+		geometry.translate(-centre.x, -centre.y, -centre.z);
+		const mesh = new THREE.Mesh(geometry, clumpMaterial);
+		mesh.position.copy(centre);
+		return mesh;
+	}
 
 	function grow(days: number) {
-		for (let id = 0; id < count; id++)
-			lengths[id] = Math.min(SHAGGY, lengths[id] + days * GROWTH_PER_DAY * pace[id]);
+		for (let s = 0; s < count; s++) {
+			const shoot = shoots[s];
+			let reach = lengths[s];
+			let left = days * pace[s];
+			// Quickly back to neat, then slowly beyond.
+			if (reach < shoot.neat) {
+				const back = Math.min(left, (shoot.neat - reach) / REGROW);
+				reach += back * REGROW;
+				left -= back;
+			}
+			reach += left * OVERGROW;
+			lengths[s] = Math.min(shoot.nodes.length, reach);
+		}
 		texture.needsUpdate = true;
 	}
 
-	// Trims tufts (each with how strongly, 0-1) for a moment: they shorten quickly while they're
-	// overgrown and more slowly once they're neat. Returns each tuft trimmed and by how much.
-	const cuts: [number, number][] = [];
-	function trim(tufts: [number, number][], dt: number) {
-		cuts.length = 0;
-		for (const [id, strength] of tufts) {
-			if (lengths[id] <= STUB) continue;
-			const rate = lengths[id] > NEAT ? 5 : 1.6;
-			const cut = Math.min(lengths[id] - STUB, rate * strength * dt);
-			lengths[id] -= cut;
-			cuts.push([id, cut]);
-		}
-		if (cuts.length) texture.needsUpdate = true;
-		return cuts;
+	function setReach(s: number, reach: number) {
+		lengths[s] = THREE.MathUtils.clamp(reach, 0, shoots[s].nodes.length);
+		texture.needsUpdate = true;
 	}
 
-	// The average length: how neat or shaggy the tree looks overall.
+	function setAll(fn: (s: number, reach: number, shoot: Shoot) => number) {
+		for (let s = 0; s < count; s++) setReach(s, fn(s, lengths[s], shoots[s]));
+	}
+
+	// How grown the tree is overall: 0 bare, 1 neat, up to ~1.7 overgrown.
 	function shagginess() {
 		let sum = 0;
-		for (let id = 0; id < count; id++) sum += lengths[id];
+		for (let s = 0; s < count; s++) sum += lengths[s] / shoots[s].neat;
 		return sum / count;
 	}
 
-	function setAll(fn: (id: number, length: number) => number) {
-		for (let id = 0; id < count; id++) lengths[id] = fn(id, lengths[id]);
-		texture.needsUpdate = true;
-	}
-
-	// Saved as one byte per tuft (hundredths of its neat length), with when it was saved, so the
-	// growth since then can be added on the next visit.
 	function save() {
 		try {
-			const bytes = new Uint8Array(count);
-			for (let id = 0; id < count; id++) bytes[id] = Math.round(lengths[id] * 100);
 			let text = '';
-			for (const byte of bytes) text += String.fromCharCode(byte);
+			for (let s = 0; s < count; s++) text += String.fromCharCode(Math.round(lengths[s] * 10));
 			localStorage.setItem(KEY, JSON.stringify({ count, at: Date.now(), lengths: btoa(text) }));
 		} catch {
 			// The tree just won't be remembered.
@@ -166,8 +494,7 @@ export function createBonsai(needles: THREE.Mesh[]) {
 			const saved = JSON.parse(localStorage.getItem(KEY) ?? 'null');
 			if (saved?.count !== count) return;
 			const text = atob(saved.lengths);
-			for (let id = 0; id < count; id++)
-				lengths[id] = Math.min(SHAGGY, Math.max(STUB, text.charCodeAt(id) / 100));
+			for (let s = 0; s < count; s++) lengths[s] = text.charCodeAt(s) / 10;
 			texture.needsUpdate = true;
 			grow(Math.max(0, (Date.now() - saved.at) / 86_400_000));
 		} catch {
@@ -176,17 +503,44 @@ export function createBonsai(needles: THREE.Mesh[]) {
 	}
 
 	return {
-		count,
-		centres,
+		turntable,
+		shoots,
 		lengths,
-		load,
-		save,
+		count,
+		materials,
+		clump,
 		grow,
-		trim,
+		setReach,
 		setAll,
 		shagginess,
-		dispose: () => texture.dispose()
+		save,
+		load,
+		dispose() {
+			texture.dispose();
+			foliageGeometry.dispose();
+			twigGeometry.dispose();
+		}
 	};
 }
 
 export type Bonsai = ReturnType<typeof createBonsai>;
+
+function weighted(x: number, weights: number[]) {
+	const total = weights.reduce((a, b) => a + b, 0);
+	let at = x * total;
+	for (let i = 0; i < weights.length; i++) {
+		at -= weights[i];
+		if (at < 0) return i;
+	}
+	return weights.length - 1;
+}
+
+function mulberry32(seed: number) {
+	return () => {
+		seed |= 0;
+		seed = (seed + 0x6d2b79f5) | 0;
+		let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	};
+}

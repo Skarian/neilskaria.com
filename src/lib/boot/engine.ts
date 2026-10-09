@@ -186,11 +186,11 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	// The cube: lifted off the table to play with, and a happy hop and spin when it's solved.
 	const cubeLift = { value: 0 };
 	const cubeJoy = { value: 0 };
-	// The bonsai: where the scissors are while trimming, where a drag to look around started, how far
-	// the camera has swung round the tree, and how long the watering has left to run.
-	let shears: { x: number; y: number } | null = null;
-	let lookAround: { x: number; y: number } | null = null;
-	const treeOrbit = { yaw: 0, pitch: 0 };
+	// The bonsai: the slash being drawn (in screen pixels), a turn of the turntable under way and how
+	// fast it's still spinning after, and how long the watering has left to run.
+	let slash: { last: { x: number; y: number }; moved: number } | null = null;
+	let turning: { x: number } | null = null;
+	let spin = 0;
 	let watering = 0;
 	let bonsaiDirty = false;
 	let snippedAt = 0;
@@ -362,45 +362,61 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	const CUBE_FROM = new THREE.Vector3(0.15, 0.55, 1).normalize();
 	const CUBE_LIFT = CUBE_FROM.clone().multiplyScalar(cubeSize * 2.4);
 
-	// The bonsai's foliage, as tufts that can be trimmed and that grow back while the visitor's away.
-	const needleMeshes: THREE.Mesh[] = [];
-	gltf.scene.traverse((o) => {
-		if (o instanceof THREE.Mesh && /^BonsaiNeedle/.test(o.name)) needleMeshes.push(o);
-	});
-	const bonsai = createBonsai(needleMeshes);
+	// The bonsai: its foliage grown here, on a turntable, lit live so it can turn (see bonsai.ts).
+	const bonsai = createBonsai(gltf.scene, { value: new THREE.Texture() });
 	bonsai.load();
-	// Snipped bits of foliage fall onto the slate and shrink away; water drops fall through the tree.
-	const slate = gltf.scene.getObjectByName('BonsaiSlate');
-	const slateTop = slate ? new THREE.Box3().setFromObject(slate).max.y : 0;
+	live.push(...bonsai.materials);
+	const TURN_KEY = 'bonsai-turn';
+	bonsai.turntable.rotation.y = Number(localStorage.getItem(TURN_KEY)) || 0;
+	// Cut clumps fall onto the slate (or the table) and shrink away; water drops fall through the tree.
+	const slate = gltf.scene.getObjectByName('BonsaiSlate')!;
+	const slateBox = new THREE.Box3().setFromObject(slate);
 	const canopy = new THREE.Box3();
-	for (let id = 0; id < bonsai.count; id++)
-		canopy.expandByPoint(new THREE.Vector3().fromArray(bonsai.centres, id * 3));
-	const BITS = 160;
+	for (const shoot of bonsai.shoots) for (const node of shoot.nodes) canopy.expandByPoint(node);
+	canopy.applyMatrix4(bonsai.turntable.matrixWorld);
+	const clumps: { mesh: THREE.Mesh; velocity: THREE.Vector3; spin: THREE.Vector3; life: number }[] =
+		[];
+	// The tabletop, so clumps that fall past its edge keep falling.
+	const nightstandTop = new THREE.Box3().setFromObject(
+		gltf.scene.getObjectByName('Nightstand') ?? slate
+	);
+	nightstandTop.min.y = slateBox.min.y;
+	// The parts of the tree that turn it: the pot, its feet and soil, and the slate under it.
+	const potParts: THREE.Object3D[] = [];
+	gltf.scene.traverse((o) => {
+		if (o instanceof THREE.Mesh && /^Bonsai(Pot|Foot|Soil|Moss|Slate)/.test(o.name))
+			potParts.push(o);
+	});
+	const BITS = 120;
 	const bits = new THREE.InstancedMesh(
-		new THREE.PlaneGeometry(0.014, 0.05),
-		new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+		new THREE.PlaneGeometry(0.01, 0.05),
+		new THREE.MeshBasicMaterial({ color: '#a9d8ff', side: THREE.DoubleSide }),
 		BITS
 	);
 	bits.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 	bits.frustumCulled = false;
-	const bitState = Array.from({ length: BITS }, () => ({
-		life: 0,
-		drop: false,
-		at: new THREE.Vector3(),
-		velocity: new THREE.Vector3(),
-		turn: new THREE.Euler(),
-		spin: new THREE.Vector3()
-	}));
-	const CLIPPING = new THREE.Color('#4a7536');
-	const DROP = new THREE.Color('#a9d8ff');
+	const bitState = Array.from({ length: BITS }, () => ({ life: 0, at: new THREE.Vector3() }));
 	const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
-	for (let i = 0; i < BITS; i++) {
-		bits.setMatrixAt(i, hidden);
-		bits.setColorAt(i, CLIPPING);
-	}
+	for (let i = 0; i < BITS; i++) bits.setMatrixAt(i, hidden);
 	scene.add(bits);
-	// How much each tuft has been trimmed since it last dropped a clipping.
-	const trimmedSince = new Float32Array(bonsai.count);
+
+	// The slash's trail, drawn over the room and fading as it goes.
+	const trail = document.createElement('canvas');
+	Object.assign(trail.style, {
+		position: 'absolute',
+		inset: '0',
+		width: '100%',
+		height: '100%',
+		pointerEvents: 'none'
+	});
+	layer.appendChild(trail);
+	const trailCtx = trail.getContext('2d')!;
+	const trailPoints: { x: number; y: number; at: number }[] = [];
+	function sizeTrail() {
+		trail.width = innerWidth * Math.min(devicePixelRatio, 2);
+		trail.height = innerHeight * Math.min(devicePixelRatio, 2);
+	}
+	sizeTrail();
 
 	// Restore the cube as it was left.
 	let cubeHistory: Move[] = [];
@@ -536,10 +552,14 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	const pickers: THREE.Mesh[] = [];
 	// The bonsai is two shapes, so the space between its pot and canopy stays clear.
 	const PICK_PARTS: Partial<Record<Thing, RegExp[]>> = {
-		bonsai: [/^Bonsai(Slate|Pot|Foot|Soil|Moss)/, /^Bonsai(Wood|Cores|Needle)/]
+		bonsai: [/^Bonsai(Slate|Pot|Foot|Soil|Moss)/, /^Bonsai(Wood|Shoots|Twigs)/]
 	};
 	pose(0);
+	// The bonsai's shapes are made with the tree turned to the front, and turn with it.
+	const turnedTo = bonsai.turntable.rotation.y;
+	bonsai.turntable.rotation.y = 0;
 	gltf.scene.updateMatrixWorld(true);
+	const turntableRest = bonsai.turntable.matrixWorld.clone().invert();
 	for (const thing of Object.keys(hover) as Thing[]) {
 		// (Most objects are one shape, whatever their parts are called; the cube's pieces have no names.)
 		for (const part of PICK_PARTS[thing] ?? [null]) {
@@ -558,10 +578,14 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			if (points.length < 4) continue;
 			const picker = new THREE.Mesh(new ConvexGeometry(points));
 			picker.userData.thing = thing;
+			picker.matrixAutoUpdate = false;
 			picker.updateMatrixWorld();
 			pickers.push(picker);
 		}
 	}
+	// Back to where the visitor left the tree turned.
+	bonsai.turntable.rotation.y = turnedTo;
+	turnTree(0);
 
 	// A soft contact shadow under the console while it rests on the nightstand.
 	const contact = new THREE.Mesh(
@@ -583,8 +607,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	sp.visible = true;
 	for (const material of live) {
 		material.envMap = envMap;
-		// Matched by eye to the baked props beside it.
-		material.envMapIntensity = 1.6;
+		// Matched by eye to the baked props beside it (the bonsai, being rougher, takes less).
+		material.envMapIntensity = bonsai.materials.includes(material) ? 0.9 : 1.6;
 	}
 
 	const key = new THREE.DirectionalLight('#ffe2c4', 1.5);
@@ -593,6 +617,12 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	const fill = new THREE.DirectionalLight('#ffd0a0', 0.5);
 	fill.position.set(-6, 2, 6);
 	scene.add(fill);
+	// The lantern as a light, for what's lit live (the bonsai most of all), tinted to match it.
+	const lanternLight = new THREE.PointLight(LANTERN_BAKED, 0, 4, 2);
+	new THREE.Box3()
+		.setFromObject(gltf.scene.getObjectByName('KumikoFrame') ?? gltf.scene)
+		.getCenter(lanternLight.position);
+	scene.add(lanternLight);
 
 	// Dust drifting in the light.
 	const moteCount = 140;
@@ -719,6 +749,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		lampTint.value
 			.setRGB(color.r / LANTERN_BAKED.r, color.g / LANTERN_BAKED.g, color.b / LANTERN_BAKED.b)
 			.multiplyScalar(level);
+		lanternLight.color.copy(color);
+		lanternLight.intensity = 1.2 * level;
 		const paper = new THREE.Color().copy(color);
 		paper.multiplyScalar(1.6 / Math.max(paper.r, paper.g, paper.b));
 		for (const material of paperMaterials)
@@ -818,9 +850,14 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		lastFrame = t;
 		swayTime.value = t;
 		pose(t);
-		if (shears) trimUnder(shears, dt, t);
+		if (!turning && Math.abs(spin) > 0.0005) {
+			turnTree(spin);
+			spin *= Math.pow(0.04, dt);
+		}
 		if (watering > 0) water(dt);
 		moveBits(dt);
+		moveClumps(dt);
+		drawTrail();
 
 		contact.material.opacity = 0.75 * (1 - Math.min(1, s.rise * 1.6));
 		moteMaterial.opacity = (0.35 + 0.45 * s.rise) * (1 - s.dive);
@@ -842,14 +879,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			if (f > 0) {
 				camera.position.lerp(focusView.eye, f);
 				look.lerp(focusView.target, f);
-			}
-			// Looking around the bonsai: the camera swings about the tree.
-			if (treeOrbit.yaw || treeOrbit.pitch) {
-				const offset = camera.position.clone().sub(look);
-				offset.applyAxisAngle(Y_AXIS, treeOrbit.yaw * f);
-				const side = new THREE.Vector3().crossVectors(Y_AXIS, offset).normalize();
-				offset.applyAxisAngle(side, -treeOrbit.pitch * f);
-				camera.position.copy(look).add(offset);
 			}
 			camera.lookAt(look);
 		}
@@ -903,6 +932,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	function resize() {
 		renderer.setSize(innerWidth, innerHeight, false);
 		sizeMask();
+		sizeTrail();
 		camera.aspect = innerWidth / innerHeight;
 		camera.updateProjectionMatrix();
 		view = startView(camera.aspect);
@@ -1051,10 +1081,14 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	function pointerdown(event: PointerEvent) {
 		if (focused === 'bonsai' && mode === 'room') {
 			canvas.setPointerCapture(event.pointerId);
-			const at = { x: event.clientX, y: event.clientY };
-			// Starting near the foliage (not only right on it) trims, so a stroke can begin off its edge.
-			if (tuftsUnder(at, BRUSH * 2).length) shears = at;
-			else lookAround = at;
+			// On the pot (or the slate), a drag turns the tree; anywhere else it slashes.
+			if (onPot(event)) {
+				turning = { x: event.clientX };
+				spin = 0;
+			} else {
+				slash = { last: { x: event.clientX, y: event.clientY }, moved: 0 };
+				trailPoints.push({ x: event.clientX, y: event.clientY, at: performance.now() });
+			}
 			return;
 		}
 		if (focused !== 'cube' || cube.busy || cubeDrag || mode !== 'room') return;
@@ -1140,8 +1174,14 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	}
 
 	async function pointerup() {
-		if (shears || lookAround) {
-			shears = lookAround = null;
+		if (turning) {
+			turning = null;
+			return;
+		}
+		if (slash) {
+			// A tap, not a slash: a light snip of the tips under it.
+			if (slash.moved < 8) snipTips(slash.last);
+			slash = null;
 			if (bonsaiDirty) bonsai.save();
 			bonsaiDirty = false;
 			emitBonsai();
@@ -1248,130 +1288,228 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			mesh.material = radio.on ? materials.on : materials.off;
 	}
 
-	// Trimming the bonsai. The scissors are a circle on screen; the tufts under it at the front of the
-	// foliage (never through to the back of the tree) shorten a little every frame they're under it.
-	const BRUSH = matchMedia('(pointer: coarse)').matches ? 46 : 38;
+	// Trimming the bonsai: a slash is a line drawn over the tree, and like a blade passing along it, it
+	// cuts every shoot it crosses (straight through the tree, front to back) where it crosses it.
+	// Everything beyond the cut falls; the shoot grows back out from there.
 	const SCISSORS =
 		"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke-linecap='round'%3E%3Cpath d='M11 21 22 4M21 21 10 4' stroke='%23fffaf0' stroke-width='5'/%3E%3Cpath d='M11 21 22 4M21 21 10 4' stroke='%233a2618' stroke-width='2.5'/%3E%3Ccircle cx='8' cy='24' r='4' fill='%23ff8f5a' stroke='%233a2618' stroke-width='2.5'/%3E%3Ccircle cx='24' cy='24' r='4' fill='%23ff8f5a' stroke='%233a2618' stroke-width='2.5'/%3E%3C/g%3E%3C/svg%3E\") 16 9, crosshair";
-	const tuftAt = new THREE.Vector3();
-
-	function tuftsUnder(at: { x: number; y: number }, brush = BRUSH) {
-		const near: [number, number, number][] = [];
-		let closest = Infinity;
-		const { centres } = bonsai;
-		for (let id = 0; id < bonsai.count; id++) {
-			tuftAt.fromArray(centres, id * 3);
-			const depth = tuftAt.distanceTo(camera.position);
-			tuftAt.project(camera);
-			const dx = ((tuftAt.x + 1) / 2) * innerWidth - at.x;
-			const dy = ((1 - tuftAt.y) / 2) * innerHeight - at.y;
-			const d2 = dx * dx + dy * dy;
-			if (d2 > brush * brush) continue;
-			near.push([id, 1 - Math.sqrt(d2) / brush, depth]);
-			closest = Math.min(closest, depth);
-		}
-		return near
-			.filter(([, , depth]) => depth < closest + 0.1)
-			.map(([id, weight]) => [id, weight]) as [number, number][];
+	const onScreen = new THREE.Vector3();
+	function screenOf(point: THREE.Vector3, matrix: THREE.Matrix4) {
+		onScreen.copy(point).applyMatrix4(matrix).project(camera);
+		return { x: ((onScreen.x + 1) / 2) * innerWidth, y: ((1 - onScreen.y) / 2) * innerHeight };
 	}
 
-	function trimUnder(at: { x: number; y: number }, dt: number, t: number) {
-		const cuts = bonsai.trim(tuftsUnder(at), dt);
-		if (!cuts.length) return;
+	function onPot(event: PointerEvent) {
+		raycaster.setFromCamera(ndcOf(event), camera);
+		return raycaster.intersectObjects(potParts, false).length > 0;
+	}
+
+	function turnTree(by: number) {
+		bonsai.turntable.rotation.y += by;
+		bonsai.turntable.updateMatrixWorld();
+		const turned = new THREE.Matrix4().multiplyMatrices(
+			bonsai.turntable.matrixWorld,
+			turntableRest
+		);
+		for (const picker of pickers)
+			if (picker.userData.thing === 'bonsai') picker.matrixWorld.copy(turned);
+		localStorage.setItem(TURN_KEY, String(bonsai.turntable.rotation.y % (Math.PI * 2)));
+	}
+
+	// Where (0-1 along it) segment p0-p1 crosses segment q0-q1, if it does.
+	function crossing(
+		p0: { x: number; y: number },
+		p1: { x: number; y: number },
+		q0: { x: number; y: number },
+		q1: { x: number; y: number }
+	) {
+		const rx = p1.x - p0.x;
+		const ry = p1.y - p0.y;
+		const sx = q1.x - q0.x;
+		const sy = q1.y - q0.y;
+		const d = rx * sy - ry * sx;
+		if (Math.abs(d) < 1e-9) return null;
+		const t = ((q0.x - p0.x) * sy - (q0.y - p0.y) * sx) / d;
+		const u = ((q0.x - p0.x) * ry - (q0.y - p0.y) * rx) / d;
+		return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? t : null;
+	}
+
+	function cutShoot(s: number, reach: number) {
+		const clump = bonsai.clump(s, Math.ceil(reach));
+		bonsai.setReach(s, reach);
 		bonsaiDirty = true;
-		let total = 0;
-		for (const [id, cut] of cuts) {
-			total += cut;
-			trimmedSince[id] += cut;
-			if (trimmedSince[id] > 0.18) {
-				trimmedSince[id] = 0;
-				dropBit(tuftAt.fromArray(bonsai.centres, id * 3), false);
+		if (clump) dropClump(clump);
+	}
+
+	// Cuts every shoot the slash's latest stretch (a to b) crosses.
+	function slashAcross(a: { x: number; y: number }, b: { x: number; y: number }) {
+		bonsai.turntable.updateMatrixWorld();
+		const matrix = bonsai.turntable.matrixWorld;
+		let cuts = 0;
+		for (let s = 0; s < bonsai.count; s++) {
+			const reach = bonsai.lengths[s];
+			if (reach <= 0.01) continue;
+			const shoot = bonsai.shoots[s];
+			let from = screenOf(shoot.hub, matrix);
+			for (let k = 0; k < Math.ceil(reach); k++) {
+				const to = screenOf(shoot.nodes[k], matrix);
+				// The last node may only be part grown.
+				const grown = Math.min(1, reach - k);
+				const end = { x: from.x + (to.x - from.x) * grown, y: from.y + (to.y - from.y) * grown };
+				const t = crossing(from, end, a, b);
+				if (t !== null) {
+					cutShoot(s, k + t * grown);
+					cuts++;
+					break;
+				}
+				from = to;
 			}
 		}
-		// A snip every so often while the scissors are cutting something.
-		if (total > 0.01 && t - snippedAt > 0.13) {
-			snippedAt = t;
-			sound.snip();
+		if (cuts) {
+			const t = performance.now() / 1000;
+			if (t - snippedAt > 0.09) {
+				snippedAt = t;
+				sound.slash(Math.min(1, 0.4 + cuts / 20));
+			}
+			if (t - bonsaiEmittedAt > 0.15) {
+				bonsaiEmittedAt = t;
+				emitBonsai();
+			}
 		}
-		if (t - bonsaiEmittedAt > 0.2) {
-			bonsaiEmittedAt = t;
-			emitBonsai();
+	}
+
+	// A light snip: the tips of the shoots under a tap come off.
+	function snipTips(at: { x: number; y: number }) {
+		bonsai.turntable.updateMatrixWorld();
+		const matrix = bonsai.turntable.matrixWorld;
+		let cuts = 0;
+		for (let s = 0; s < bonsai.count; s++) {
+			const reach = bonsai.lengths[s];
+			if (reach <= 0.01) continue;
+			const tip = screenOf(bonsai.shoots[s].nodes[Math.max(0, Math.ceil(reach) - 1)], matrix);
+			if (Math.hypot(tip.x - at.x, tip.y - at.y) > 26) continue;
+			cutShoot(s, Math.max(0, reach - 1.5));
+			cuts++;
 		}
+		if (cuts) sound.snip();
 	}
 
 	function dragTree(event: PointerEvent) {
-		if (shears) {
-			shears.x = event.clientX;
-			shears.y = event.clientY;
+		if (turning) {
+			const by = (event.clientX - turning.x) * 0.01;
+			turnTree(by);
+			spin = by;
+			turning.x = event.clientX;
 			return;
 		}
-		if (lookAround) {
-			treeOrbit.yaw = THREE.MathUtils.clamp(
-				treeOrbit.yaw - (event.clientX - lookAround.x) * 0.005,
-				-0.6,
-				0.6
-			);
-			treeOrbit.pitch = THREE.MathUtils.clamp(
-				treeOrbit.pitch + (event.clientY - lookAround.y) * 0.004,
-				-0.15,
-				0.35
-			);
-			lookAround.x = event.clientX;
-			lookAround.y = event.clientY;
+		if (slash) {
+			const to = { x: event.clientX, y: event.clientY };
+			slash.moved += Math.hypot(to.x - slash.last.x, to.y - slash.last.y);
+			slashAcross(slash.last, to);
+			slash.last = to;
+			trailPoints.push({ ...to, at: performance.now() });
 			return;
 		}
-		if (event.pointerType === 'mouse')
-			canvas.style.cursor = tuftsUnder({ x: event.clientX, y: event.clientY }).length
-				? SCISSORS
-				: 'grab';
+		if (event.pointerType === 'mouse') canvas.style.cursor = onPot(event) ? 'grab' : SCISSORS;
 	}
 
-	function dropBit(from: THREE.Vector3, drop: boolean) {
-		const i = bitState.findIndex((b) => b.life <= 0);
-		if (i < 0) return;
-		const bit = bitState[i];
+	// The trail: a bright stroke that thins and fades from its tail.
+	function drawTrail() {
+		const now = performance.now();
+		while (trailPoints.length && now - trailPoints[0].at > 260) trailPoints.shift();
+		const scale = trail.width / innerWidth;
+		trailCtx.clearRect(0, 0, trail.width, trail.height);
+		if (trailPoints.length < 2) return;
+		trailCtx.lineCap = 'round';
+		for (let i = 1; i < trailPoints.length; i++) {
+			const a = trailPoints[i - 1];
+			const b = trailPoints[i];
+			const fresh = 1 - (now - b.at) / 260;
+			trailCtx.strokeStyle = `rgba(255, 250, 235, ${0.9 * fresh})`;
+			trailCtx.shadowColor = 'rgba(255, 220, 160, 0.9)';
+			trailCtx.shadowBlur = 10 * scale;
+			trailCtx.lineWidth = (1.5 + 5 * fresh) * scale;
+			trailCtx.beginPath();
+			trailCtx.moveTo(a.x * scale, a.y * scale);
+			trailCtx.lineTo(b.x * scale, b.y * scale);
+			trailCtx.stroke();
+		}
+	}
+
+	function dropClump(mesh: THREE.Mesh) {
+		// Only so many falling at once: the oldest go first.
+		if (clumps.length > 70) {
+			const oldest = clumps.shift()!;
+			oldest.mesh.removeFromParent();
+			oldest.mesh.geometry.dispose();
+		}
+		scene.add(mesh);
+		const outward = mesh.position
+			.clone()
+			.sub(canopy.getCenter(new THREE.Vector3()))
+			.setY(0)
+			.normalize();
+		clumps.push({
+			mesh,
+			velocity: outward
+				.multiplyScalar(0.15 + Math.random() * 0.2)
+				.add(new THREE.Vector3(0, 0.15 + Math.random() * 0.25, 0)),
+			spin: new THREE.Vector3(Math.random() * 6 - 3, Math.random() * 6 - 3, Math.random() * 6 - 3),
+			life: 1
+		});
+	}
+
+	function moveClumps(dt: number) {
+		for (let i = clumps.length - 1; i >= 0; i--) {
+			const c = clumps[i];
+			const p = c.mesh.position;
+			const onSlate =
+				p.x > slateBox.min.x &&
+				p.x < slateBox.max.x &&
+				p.z > slateBox.min.z &&
+				p.z < slateBox.max.z;
+			const floor = (onSlate ? slateBox.max.y : slateBox.min.y) + 0.01;
+			// Off the edge of the table, they just fall out of sight.
+			if (p.y < slateBox.min.y - 1.5) c.life = 0;
+			const offTable =
+				!onSlate && !nightstandTop.containsPoint(new THREE.Vector3(p.x, nightstandTop.min.y, p.z));
+			if (p.y > floor || (offTable && c.life > 0)) {
+				c.velocity.y -= 3.2 * dt;
+				p.addScaledVector(c.velocity, dt);
+				c.mesh.rotation.x += c.spin.x * dt;
+				c.mesh.rotation.y += c.spin.y * dt;
+				c.mesh.rotation.z += c.spin.z * dt;
+			} else {
+				// Landed: settle, then shrink away.
+				p.y = floor;
+				c.life -= dt * 0.5;
+				c.mesh.scale.setScalar(Math.max(0, Math.min(1, c.life * 2.5)));
+				if (c.life <= 0) {
+					c.mesh.removeFromParent();
+					c.mesh.geometry.dispose();
+					clumps.splice(i, 1);
+				}
+			}
+		}
+	}
+
+	function dropBit(from: THREE.Vector3) {
+		const bit = bitState.find((b) => b.life <= 0);
+		if (!bit) return;
 		bit.life = 1;
-		bit.drop = drop;
 		bit.at.copy(from);
-		if (drop) bit.velocity.set(0, -1.4, 0);
-		else
-			bit.velocity.set(
-				(Math.random() - 0.5) * 0.4,
-				0.2 + Math.random() * 0.3,
-				(Math.random() - 0.2) * 0.4
-			);
-		bit.turn.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
-		bit.spin.set(Math.random() * 8 - 4, Math.random() * 8 - 4, Math.random() * 8 - 4);
-		bits.setColorAt(i, drop ? DROP : CLIPPING);
-		bits.instanceColor!.needsUpdate = true;
 	}
 
 	const bitMatrix = new THREE.Matrix4();
-	const bitTurn = new THREE.Quaternion();
-	const bitScale = new THREE.Vector3();
 	function moveBits(dt: number) {
 		let moved = false;
 		for (let i = 0; i < BITS; i++) {
 			const bit = bitState[i];
 			if (bit.life <= 0) continue;
 			moved = true;
-			if (bit.at.y > slateTop + 0.005) {
-				// Falling, tumbling.
-				bit.velocity.y -= 3 * dt;
-				bit.at.addScaledVector(bit.velocity, dt);
-				bit.turn.x += bit.spin.x * dt;
-				bit.turn.y += bit.spin.y * dt;
-				bit.turn.z += bit.spin.z * dt;
-			} else if (bit.drop) bit.life = 0;
-			else {
-				// Landed: lie flat and shrink away.
-				bit.at.y = slateTop + 0.004;
-				bit.turn.set(-Math.PI / 2, 0, bit.turn.z);
-				bit.life -= dt * 0.7;
-			}
-			const size = bit.drop ? 0.5 : Math.max(0, Math.min(1, bit.life * 2));
-			bitScale.setScalar(size);
-			bits.setMatrixAt(i, bitMatrix.compose(bit.at, bitTurn.setFromEuler(bit.turn), bitScale));
+			bit.at.y -= 1.6 * dt;
+			if (bit.at.y < slateBox.max.y) bit.life = 0;
+			bits.setMatrixAt(i, bit.life > 0 ? bitMatrix.makeTranslation(bit.at) : hidden);
 		}
 		if (moved) bits.instanceMatrix.needsUpdate = true;
 	}
@@ -1387,8 +1525,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 					THREE.MathUtils.lerp(canopy.min.x, canopy.max.x, Math.random()),
 					canopy.max.y + 0.25 + Math.random() * 0.2,
 					THREE.MathUtils.lerp(canopy.min.z, canopy.max.z, Math.random())
-				),
-				true
+				)
 			);
 		if (watering <= 0) {
 			bonsai.save();
@@ -1414,7 +1551,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			duration: 0.9,
 			ease: 'power2.inOut',
 			onUpdate: () => {
-				bonsai.setAll((id) => from[id] + (1 - from[id]) * k.t);
+				bonsai.setAll((id, _, shoot) => from[id] + (shoot.neat - from[id]) * k.t);
 				emitBonsai();
 			},
 			onComplete: () => bonsai.save()
@@ -1422,11 +1559,11 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	}
 
 	function leaveTree() {
-		shears = lookAround = null;
+		slash = turning = null;
+		spin = 0;
 		if (bonsaiDirty) bonsai.save();
 		bonsaiDirty = false;
 		canvas.style.cursor = '';
-		gsap.to(treeOrbit, { yaw: 0, pitch: 0, duration: 1, ease: 'power3.inOut' });
 	}
 
 	function emitBonsai() {
@@ -1577,6 +1714,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		rubiks.dispose();
 		if (bonsaiDirty) bonsai.save();
 		bonsai.dispose();
+		trail.remove();
 		for (const picker of pickers) picker.geometry.dispose();
 		screenTexture.dispose();
 		clockTexture.dispose();

@@ -83,17 +83,20 @@
 	const dialAt = (freq: number) => ((freq - FM_MIN) / (FM_MAX - FM_MIN)) * 100;
 	const station = $derived(player.station());
 
-	// The bonsai's state, from the room: how long its tufts are on average, from trimmed (0.3) through
-	// neat (1) to shaggy (1.6).
+	// The bonsai's state, from the room: how far its shoots reach on average, from bare (0) through
+	// neat (1) to wild (about 1.7).
 	let bonsai = $state<BonsaiState>({ shagginess: 1 });
+	const GROWTH_MAX = 1.7;
 	const treeLooks = $derived(
-		bonsai.shagginess > 1.3
+		bonsai.shagginess > 1.35
 			? 'Needs a trim'
-			: bonsai.shagginess > 1.08
+			: bonsai.shagginess > 1.1
 				? 'Getting shaggy'
-				: bonsai.shagginess > 0.9
+				: bonsai.shagginess > 0.85
 					? 'Looking neat'
-					: 'Freshly trimmed'
+					: bonsai.shagginess > 0.2
+						? 'Freshly trimmed'
+						: 'Bare branches'
 	);
 
 	// Confetti for a solve: scattered pieces in the cube's colours.
@@ -461,19 +464,21 @@
 				class="growth"
 				role="meter"
 				aria-label="Growth"
-				aria-valuemin={0.3}
-				aria-valuemax={1.6}
+				aria-valuemin={0}
+				aria-valuemax={GROWTH_MAX}
 				aria-valuenow={bonsai.shagginess}
 				aria-valuetext={treeLooks}
-				style:--at="{((bonsai.shagginess - 0.3) / 1.3) * 100}%"
+				style:--at="{Math.min(1, bonsai.shagginess / GROWTH_MAX) * 100}%"
 			>
 				<span class="neat" aria-hidden="true"></span>
 				<span class="needle" aria-hidden="true"></span>
 			</div>
 			<p class="ends" aria-hidden="true">
-				<span>TRIMMED</span><span>NEAT</span><span>SHAGGY</span>
+				<span>BARE</span><span>NEAT</span><span>WILD</span>
 			</p>
-			<p class="hint">Drag across the leaves to trim them. Drag beside the tree to look around.</p>
+			<p class="hint">
+				Slash across the leaves to cut them; tap for a light snip. Drag the pot to turn the tree.
+			</p>
 			<div class="actions">
 				<button class="back" onclick={() => engine?.unfocus()}>◀ BACK</button>
 				<button class="back go water" onclick={() => engine?.waterBonsai()}>WATER</button>
@@ -995,7 +1000,7 @@
 
 	.growth .neat {
 		position: absolute;
-		left: calc((1 - 0.3) / 1.3 * 100%);
+		left: calc(1 / 1.7 * 100%);
 		top: -0.45rem;
 		bottom: -0.45rem;
 		width: 3px;

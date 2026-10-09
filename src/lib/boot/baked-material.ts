@@ -16,17 +16,6 @@ export type BakedLighting = {
 // Shared clock for the foliage's sway.
 export const swayTime = { value: 0 };
 
-// How long each of the bonsai's tufts is (see bonsai.ts): one texel per tuft, 1 being its neat length.
-const NEAT_EVERYWHERE = new THREE.DataTexture(
-	new Float32Array([1]),
-	1,
-	1,
-	THREE.RedFormat,
-	THREE.FloatType
-);
-NEAT_EVERYWHERE.needsUpdate = true;
-export const tuftLengths: { value: THREE.Texture } = { value: NEAT_EVERYWHERE };
-
 export function bakedMaterial(
 	source: THREE.MeshStandardMaterial,
 	lighting: BakedLighting,
@@ -77,31 +66,15 @@ export function bakedMaterial(
 			// A very gentle sway: whole pads drift slowly, more towards the top of the tree, with a
 			// faint flutter in the needles.
 			shader.uniforms.swayTime = swayTime;
-			shader.uniforms.tuftLengths = tuftLengths;
 			shader.vertexShader = shader.vertexShader
 				.replace(
 					'#include <common>',
 					`#include <common>
-					uniform float swayTime;
-					uniform sampler2D tuftLengths;
-					attribute vec3 needleRoot;
-					attribute vec3 needleAxis;
-					attribute float tuftId;
-					attribute float needleTip;`
+					uniform float swayTime;`
 				)
 				.replace(
 					'#include <begin_vertex>',
 					`#include <begin_vertex>
-					// Trimmed, a needle's tip slides back along it; overgrown, the whole needle reaches out
-					// past the pad and its tip lengthens, so the pad's outline turns shaggy. (The pads' cores
-					// have no needles, so no axis: nothing moves.)
-					if ( dot( needleAxis, needleAxis ) > 0.0 ) {
-						int id = int( tuftId + 0.5 );
-						int width = textureSize( tuftLengths, 0 ).x;
-						float grow = texelFetch( tuftLengths, ivec2( id % width, id / width ), 0 ).r;
-						if ( needleTip > 0.5 ) transformed = needleRoot + ( transformed - needleRoot ) * min( grow, 1.0 );
-						transformed += needleAxis * max( grow - 1.0, 0.0 ) * ( needleTip > 0.5 ? 2.4 : 1.2 );
-					}
 					float reach = smoothstep( 1.2, 2.4, position.y );
 					float drift = sin( swayTime * 0.9 + position.x * 2.5 ) + 0.5 * sin( swayTime * 1.7 + position.z * 3.1 );
 					float flutter = sin( swayTime * 3.1 + dot( position, vec3( 61.0, 47.0, 53.0 ) ) );
@@ -111,7 +84,7 @@ export function bakedMaterial(
 		}
 	};
 	// three.js caches compiled shaders by the source of onBeforeCompile, which is the same for every
-	// baked material; the foliage's version (sway and growth) has to be told apart from the rest.
+	// baked material; the foliage's version (with sway) has to be told apart from the rest.
 	material.customProgramCacheKey = () => (options.sway ? 'baked-foliage' : 'baked');
 	return material;
 }
