@@ -69,6 +69,12 @@ function getStream() {
 }
 
 function updateStatus() {
+	const before = radio.status;
+	setStatus();
+	if (radio.status !== before && local) applyLocal();
+}
+
+function setStatus() {
 	const station = stationAt(radio.freq);
 	radio.status = !radio.on
 		? 'off'
@@ -137,7 +143,12 @@ function applyLocal() {
 		local = { ctx, synth: createRadio(ctx, ctx.destination) };
 	}
 	if (radio.on) void local.ctx.resume();
-	local.synth.set({ on: radio.on, freq: radio.freq, volume: radio.muted ? 0 : radio.volume });
+	local.synth.set({
+		on: radio.on,
+		freq: radio.freq,
+		volume: radio.muted ? 0 : radio.volume,
+		waiting: radio.status === 'tuning'
+	});
 }
 
 // The stream follows the dial once it settles on a station (not on every step of a sweep).

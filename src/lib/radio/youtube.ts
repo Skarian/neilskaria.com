@@ -9,6 +9,7 @@ type YTPlayer = {
 	pauseVideo(): void;
 	stopVideo(): void;
 	setVolume(volume: number): void;
+	getDuration(): number;
 	mute(): void;
 	unMute(): void;
 	destroy(): void;
@@ -27,7 +28,7 @@ type YTNamespace = {
 	) => YTPlayer;
 };
 
-export type StreamStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'blocked' | 'error';
+export type StreamStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'blocked' | 'error' | 'ad';
 
 let api: Promise<YTNamespace> | undefined;
 
@@ -55,6 +56,33 @@ export function createStreamPlayer(onStatus: (status: StreamStatus, id: string |
 	// The stream loaded, and whether it should be playing.
 	let current: string | null = null;
 	let wanted = false;
+	let volume = 0.7;
+	// An ad break: the stream's muted (and reported as an ad) until it's over.
+	let inAd = false;
+	let watching: ReturnType<typeof setInterval> | undefined;
+
+	function applyVolume(p: YTPlayer) {
+		const v = inAd ? 0 : volume;
+		p.setVolume(Math.round(Math.min(1, Math.max(0, v)) * 100));
+		if (v <= 0) p.mute();
+		else p.unMute();
+	}
+
+	// A live stream's duration runs to hours; while an ad plays, the player reports the ad's instead
+	// (seconds). That's the tell: mute until it's back.
+	async function watchForAds() {
+		clearInterval(watching);
+		const p = await ensure();
+		watching = setInterval(() => {
+			if (!wanted) return clearInterval(watching);
+			const duration = p.getDuration();
+			const ad = duration > 0 && duration < 180;
+			if (ad === inAd) return;
+			inAd = ad;
+			applyVolume(p);
+			onStatus(ad ? 'ad' : 'playing', current);
+		}, 1000);
+	}
 
 	function ensure() {
 		player ??= loadApi().then(
@@ -93,7 +121,7 @@ export function createStreamPlayer(onStatus: (status: StreamStatus, id: string |
 							onReady: (event) => resolve(event.target),
 							onStateChange: (event) => {
 								// 1 playing, 3 buffering, 2 paused, 0 ended, 5 cued, -1 unstarted.
-								if (event.data === 1) onStatus('playing', current);
+								if (event.data === 1) onStatus(inAd ? 'ad' : 'playing', current);
 								else if (event.data === 3 || (event.data === -1 && wanted))
 									onStatus('loading', current);
 								else if (event.data === 2) onStatus(wanted ? 'loading' : 'paused', current);
@@ -123,21 +151,22 @@ export function createStreamPlayer(onStatus: (status: StreamStatus, id: string |
 			const p = await ensure();
 			if (!wanted) return;
 			current = id;
+			inAd = false;
+			applyVolume(p);
 			p.loadVideoById(id);
 			p.playVideo();
+			void watchForAds();
 		},
 		async stop() {
 			wanted = false;
+			clearInterval(watching);
 			if (!player) return;
 			(await player).pauseVideo();
 			onStatus('paused', current);
 		},
-		async setVolume(volume: number) {
-			if (!player) return;
-			const p = await player;
-			p.setVolume(Math.round(Math.min(1, Math.max(0, volume)) * 100));
-			if (volume <= 0) p.mute();
-			else p.unMute();
+		async setVolume(value: number) {
+			volume = value;
+			if (player) applyVolume(await player);
 		}
 	};
 }

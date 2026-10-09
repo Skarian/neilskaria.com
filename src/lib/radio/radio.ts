@@ -259,6 +259,7 @@ export function createRadio(ctx: AudioContext, out: AudioNode) {
 	let on = false;
 	let freq = STATIONS[0].freq;
 	let level = 0.7;
+	let waiting = false;
 	let timer: ReturnType<typeof setInterval> | undefined;
 
 	// Schedules a little ahead of time, so the music never stutters.
@@ -289,7 +290,9 @@ export function createRadio(ctx: AudioContext, out: AudioNode) {
 		}
 		// Static, fading out as any station (streamed or local) comes in.
 		const clearest = Math.max(...STATIONS.map((station) => reception(freq, station.freq)));
-		hissGain.gain.setTargetAtTime(0.01 + 0.11 * Math.pow(1 - clearest, 1.5), now, 0.03);
+		// (And softly while a stream's still coming in, or sitting out an ad.)
+		const hiss = Math.max(0.01 + 0.11 * Math.pow(1 - clearest, 1.5), waiting ? 0.05 : 0);
+		hissGain.gain.setTargetAtTime(hiss, now, 0.08);
 		volume.gain.setTargetAtTime(on ? level : 0, now, on ? 0.08 : 0.05);
 		if (on && !timer) {
 			schedule();
@@ -301,8 +304,9 @@ export function createRadio(ctx: AudioContext, out: AudioNode) {
 	}
 
 	return {
-		set(state: { on: boolean; freq: number; volume: number }) {
+		set(state: { on: boolean; freq: number; volume: number; waiting?: boolean }) {
 			on = state.on;
+			waiting = state.waiting ?? false;
 			freq = state.freq;
 			level = state.volume;
 			update();
