@@ -60,11 +60,26 @@ const LANTERN_PAPER = new THREE.Color('#ffa24a').multiplyScalar(1.15);
 // The colour the lantern's bulb was baked with (linear), so other colours can be expressed relative to it.
 const LANTERN_BAKED = new THREE.Color(1.0, 0.62, 0.3);
 
-// Landscape screens see the bed and the bedside table; portrait screens centre on the table.
+// Both look down at the tabletop from close by; phones use a wider lens to fit all of it in.
 export function startView(aspect: number) {
+	if (import.meta.env.DEV) {
+		// Lets a test script try camera framings live.
+		const o = (window as unknown as { __view?: Record<string, number[]> }).__view;
+		const v = o && (aspect < 1 ? o.portrait : o.landscape);
+		if (v)
+			return {
+				eye: new THREE.Vector3(v[0], v[1], v[2]),
+				target: new THREE.Vector3(v[3], v[4], v[5]),
+				fov: v[6]
+			};
+	}
 	return aspect < 1
-		? { eye: new THREE.Vector3(0.1, 2.6, 21), target: new THREE.Vector3(-0.3, 0.1, 0) }
-		: { eye: new THREE.Vector3(4.2, 3.2, 14), target: new THREE.Vector3(-1.8, -0.6, 0) };
+		? {
+				eye: new THREE.Vector3(0.4, 5.8, 6.4),
+				target: new THREE.Vector3(0.15, 0.1, -0.15),
+				fov: 60
+			}
+		: { eye: new THREE.Vector3(0.8, 4.4, 5.2), target: new THREE.Vector3(0, 0.3, -0.15), fov: 40 };
 }
 
 export async function createRoom(options: RoomOptions): Promise<Room> {
@@ -82,6 +97,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	// at 0.05; any closer wastes depth precision and small details start to flicker.
 	const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.05, 120);
 	let view = startView(camera.aspect);
+	camera.fov = view.fov;
+	camera.updateProjectionMatrix();
 	camera.position.copy(view.eye);
 	camera.lookAt(view.target);
 
@@ -484,6 +501,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		camera.aspect = innerWidth / innerHeight;
 		camera.updateProjectionMatrix();
 		view = startView(camera.aspect);
+		camera.fov = view.fov;
+		camera.updateProjectionMatrix();
 		computeFinalCamera();
 	}
 

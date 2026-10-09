@@ -319,7 +319,7 @@ for obj in foliage:
 	add('foliage', obj)
 
 # A kumiko lantern stands where a lamp would; its bulb is the warm light in the bake.
-lamp_x, lamp_y = 0.8, 1.15
+lamp_x, lamp_y = 0.95, 1.2
 lantern_parts, lantern_paper, lantern_light = props.kumiko_lantern()
 for obj in lantern_parts + [lantern_paper]:
 	obj.location = Vector((lamp_x, lamp_y, TOP)) + obj.location
@@ -706,11 +706,19 @@ if PREVIEW:
 	scene.view_settings.exposure = LOOK['exposure']
 	scene.view_settings.look = LOOK['look']
 	look_name = os.environ.get('LOOK', 'alita')
-	views = [('phone', (0.9, -18.5, 3.4), (-0.3, 0, 0.7)), ('start', (4.2, -14, 3.2), (-1.8, 0, -0.6)), ('near', (0.9, -6, 1.9), (0, -0.9, 1.45)), ('bed', (4.0, -27, 9.5), (-8.5, -6, -2.5)), ('table', (0.4, -5.2, 1.6), (0.0, 0.5, 0.4))]
-	for name, eye, target in views:
+	views = [
+		('desk', (0.9, -5.8, 2.9), (0, 0, 0.55), 40),
+		('phone', (0.25, -8.6, 1.4), (0.0, 0, -0.9), 58),
+		('phone2', (0.4, -9.6, 2.2), (0.0, 0, -0.4), 55),
+		('near', (0.9, -6, 1.9), (0, -0.9, 1.45), 35),
+	]
+	if os.environ.get('VIEWS_JSON'):
+		views = [tuple(v) for v in json.loads(os.environ['VIEWS_JSON'])]
+	for name, eye, target, fov in views:
+		cam.data.angle_y = math.radians(fov)
 		if only and name not in only.split(','):
 			continue
-		portrait = name == 'phone'
+		portrait = name.startswith('p')
 		scene.render.resolution_x, scene.render.resolution_y = (540, 1170) if portrait else (1200, 750)
 		cam.data.sensor_fit = 'VERTICAL'
 		cam.location = eye
