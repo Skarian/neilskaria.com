@@ -62,45 +62,8 @@
 	});
 	let engine: Room | undefined;
 
-	// The Rubik's cube: the game's state comes from the room; the best time is kept here.
-	const BEST_KEY = 'cube-best';
-	let cube = $state<CubeState>({
-		scrambled: false,
-		moves: 0,
-		startedAt: null,
-		solvedIn: null,
-		timed: false,
-		busy: false
-	});
-	let best = $state<{ ms: number; moves: number } | null>(null);
-	let newBest = $state(false);
-	let now = $state(Date.now());
-	const elapsed = $derived(
-		cube.solvedIn ?? (cube.startedAt === null ? 0 : Math.max(0, now - cube.startedAt))
-	);
-	// The clock only ticks while an attempt is under way.
-	$effect(() => {
-		if (focused !== 'cube' || cube.startedAt === null || cube.solvedIn !== null) return;
-		const timer = setInterval(() => (now = Date.now()), 100);
-		return () => clearInterval(timer);
-	});
-
-	function onCube(state: CubeState) {
-		if (state.solvedIn !== null && cube.solvedIn === null && state.timed) {
-			newBest = !best || state.solvedIn < best.ms;
-			if (newBest) {
-				best = { ms: state.solvedIn, moves: state.moves };
-				localStorage.setItem(BEST_KEY, JSON.stringify(best));
-			}
-		} else if (state.solvedIn === null) newBest = false;
-		cube = state;
-	}
-
-	function stopwatch(ms: number) {
-		const tenths = Math.floor(ms / 100);
-		const seconds = Math.floor(tenths / 10);
-		return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}.${tenths % 10}`;
-	}
+	// The Rubik's cube's state, from the room.
+	let cube = $state<CubeState>({ scrambled: false, solved: false, busy: false });
 
 	// Confetti for a solve: scattered pieces in the cube's colours.
 	const CONFETTI = Array.from({ length: 28 }, (_, i) => ({
@@ -133,7 +96,7 @@
 			onProgress: (value) => (progress = value),
 			onMode,
 			onFocus: (thing) => (focused = thing),
-			onCube
+			onCube: (state) => (cube = state)
 		});
 		engine.setLantern(lanternColor, lanternLevel);
 	}
@@ -190,11 +153,6 @@
 
 	onMount(() => {
 		muted = localStorage.getItem(MUTED_KEY) === '1';
-		try {
-			best = JSON.parse(localStorage.getItem(BEST_KEY) ?? 'null');
-		} catch {
-			best = null;
-		}
 		const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 		// A first visit, or a reload while in the room, starts in the room.
 		const inRoom = sessionStorage.getItem(PLACE_KEY) === 'room';
@@ -307,38 +265,21 @@
 
 	{#if focused === 'cube'}
 		<aside
-			class="panel"
+			class="panel cube-panel"
 			aria-label="Rubik's cube"
 			in:pop={{ delay: 350 }}
 			out:pop={{ duration: 220 }}
 		>
 			<p class="ribbon cube-ribbon">CUBE</p>
-			{#key cube.solvedIn !== null}
-				<h2 class:cheer={cube.solvedIn !== null}>
-					{cube.solvedIn !== null ? 'Solved!' : cube.scrambled ? 'Solve it!' : 'Mix it up!'}
+			{#key cube.solved}
+				<h2 class:cheer={cube.solved}>
+					{cube.solved ? 'Solved!' : cube.scrambled ? 'Solve it!' : 'Mix it up!'}
 				</h2>
 			{/key}
-			<dl class="stats">
-				<div>
-					<dt>MOVES</dt>
-					<dd>{cube.moves}</dd>
-				</div>
-				<div>
-					<dt>TIME</dt>
-					<dd>{stopwatch(elapsed)}</dd>
-				</div>
-				<div>
-					<dt>BEST</dt>
-					<dd>{best ? stopwatch(best.ms) : '-:--'}</dd>
-				</div>
-			</dl>
-			{#if newBest}
-				<p class="badge">NEW BEST!</p>
-			{/if}
 			<p class="hint">
 				{cube.scrambled
 					? 'Drag a face to turn it. Drag around the cube to turn it over.'
-					: 'Scramble it, then race the clock to solve it.'}
+					: 'Scramble it, then try to solve it.'}
 			</p>
 			<div class="actions">
 				<button class="back" onclick={() => engine?.unfocus()}>◀ BACK</button>
@@ -351,7 +292,7 @@
 					disabled={cube.busy || !cube.scrambled}>SOLVE</button
 				>
 			</div>
-			{#if cube.solvedIn !== null}
+			{#if cube.solved}
 				<div class="confetti" aria-hidden="true">
 					{#each CONFETTI as c, i (i)}
 						<i
@@ -649,52 +590,6 @@
 		animation: cheer 0.6s cubic-bezier(0.3, 1.8, 0.5, 1) both;
 	}
 
-	/* Moves, time and best, like a game's score readout. */
-	.stats {
-		display: grid;
-		grid-template-columns: repeat(3, 1fr);
-		gap: 0.5rem;
-		width: 100%;
-	}
-
-	.stats div {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		gap: 0.15rem;
-		padding: 0.45rem 0.2rem;
-		border: 3px solid var(--ink);
-		border-radius: 14px;
-		background: #fffaf0;
-		box-shadow: inset 0 -3px 0 rgb(0 0 0 / 0.08);
-	}
-
-	.stats dt {
-		font-size: 0.6rem;
-		letter-spacing: 0.15em;
-		opacity: 0.7;
-	}
-
-	.stats dd {
-		font-family: 'Arial Black', 'Helvetica Neue', Arial, sans-serif;
-		font-size: 1rem;
-		font-variant-numeric: tabular-nums;
-	}
-
-	.badge {
-		margin-top: -0.3rem;
-		padding: 0.15rem 0.7rem;
-		border: 3px solid var(--ink);
-		border-radius: 999px;
-		background: #ffd94a;
-		font-family: 'Arial Black', 'Helvetica Neue', Arial, sans-serif;
-		font-style: italic;
-		font-size: 0.7rem;
-		letter-spacing: 0.12em;
-		box-shadow: 0 3px 0 var(--ink);
-		animation: cheer 0.6s 0.15s cubic-bezier(0.3, 1.8, 0.5, 1) both;
-	}
-
 	.hint {
 		font-size: 0.72rem;
 		line-height: 1.45;
@@ -706,15 +601,15 @@
 		background: #ff8f5a;
 	}
 
-	.panel:has(.stats) .actions {
+	.cube-panel .actions {
 		gap: 0.45rem;
 	}
 
-	.panel:has(.stats) {
+	.cube-panel {
 		width: min(21.5rem, calc(100vw - 2rem));
 	}
 
-	.panel:has(.stats) .back {
+	.cube-panel .back {
 		padding-inline: 0.9rem;
 		white-space: nowrap;
 	}
@@ -869,7 +764,6 @@
 		.gem,
 		.swatches button[aria-checked='true']::after,
 		.panel h2.cheer,
-		.badge,
 		.confetti {
 			animation: none;
 		}

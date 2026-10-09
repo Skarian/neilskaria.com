@@ -29,13 +29,8 @@ export type Thing = 'sp' | 'cube' | 'clock' | 'lantern' | 'bonsai';
 export type CubeState = {
 	// Not solved.
 	scrambled: boolean;
-	// The player's turns since the last scramble, and when the first one was made.
-	moves: number;
-	startedAt: number | null;
-	// How long the player took, once they've solved it.
-	solvedIn: number | null;
-	// Whether this attempt started from a Scramble (so it can count as a best time).
-	timed: boolean;
+	// The player has just solved it themselves (until their next turn or a scramble).
+	solved: boolean;
 	// Scrambling or solving on its own.
 	busy: boolean;
 };
@@ -339,10 +334,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	for (const move of cubeHistory) rubiks.apply(move);
 	const cube: CubeState = {
 		scrambled: !rubiks.isSolved(),
-		moves: 0,
-		startedAt: null,
-		solvedIn: null,
-		timed: false,
+		solved: false,
 		busy: false
 	};
 
@@ -973,14 +965,9 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		const wasScrambled = cube.scrambled;
 		remember(move);
 		sound.tick();
-		// The first turn after a solve starts a new (untimed, unless scrambled) attempt.
-		if (cube.solvedIn !== null)
-			Object.assign(cube, { moves: 0, startedAt: null, solvedIn: null, timed: false });
-		cube.moves += 1;
-		cube.startedAt ??= Date.now();
 		cube.scrambled = !rubiks.isSolved();
-		if (wasScrambled && !cube.scrambled) {
-			cube.solvedIn = Date.now() - (cube.startedAt ?? Date.now());
+		cube.solved = wasScrambled && !cube.scrambled;
+		if (cube.solved) {
 			cubeHistory = [];
 			saveCube();
 			sound.fanfare();
@@ -1009,13 +996,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		if (focused !== 'cube' || cube.busy) return;
 		void sound.resume();
 		await playMoves(scrambleMoves(20), 0.09);
-		Object.assign(cube, {
-			scrambled: !rubiks.isSolved(),
-			moves: 0,
-			startedAt: null,
-			solvedIn: null,
-			timed: true
-		});
+		Object.assign(cube, { scrambled: !rubiks.isSolved(), solved: false });
 		emitCube();
 	}
 
@@ -1027,13 +1008,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		await playMoves(moves, THREE.MathUtils.clamp(5 / moves.length, 0.06, 0.2));
 		cubeHistory = [];
 		saveCube();
-		Object.assign(cube, {
-			scrambled: false,
-			moves: 0,
-			startedAt: null,
-			solvedIn: null,
-			timed: false
-		});
+		Object.assign(cube, { scrambled: false, solved: false });
 		emitCube();
 		hop();
 	}
