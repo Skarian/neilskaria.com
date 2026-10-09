@@ -113,7 +113,11 @@
 			startIn,
 			onProgress: (value) => (progress = value),
 			onMode,
-			onFocus: (thing) => (focused = thing),
+			onFocus: (thing) => {
+				focused = thing;
+				// Picking up the clock radio switches it on (still inside the click, so sound can play).
+				if (thing === 'clock' && !radio.on) player.setOn(true);
+			},
 			onCube: (state) => (cube = state),
 			// The music dips a little under the boot chime.
 			onChime: (playing) => player.duck(playing)
