@@ -176,7 +176,7 @@
 
 <svelte:window onkeydown={keydown} />
 
-<div bind:this={layer} class="room-layer" aria-hidden={phase === 'page'}>
+<div bind:this={layer} class="room-layer" aria-hidden={phase === 'page'} data-snapshot-skip>
 	<canvas bind:this={canvas} class:live={phase !== 'loading'}></canvas>
 
 	{#if phase === 'loading'}
