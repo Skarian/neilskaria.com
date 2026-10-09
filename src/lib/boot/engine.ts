@@ -825,7 +825,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		// How much of the space it's given each object fills (the cube less, to leave room to turn it).
 		const fill =
 			(portrait
-				? { cube: 0.4, clock: 0.9, bonsai: 0.97, lantern: 0.8 }
+				? { cube: innerWidth <= 640 ? 0.55 : 0.4, clock: 0.9, bonsai: 0.97, lantern: 0.8 }
 				: { cube: 0.55, clock: 0.9, bonsai: 0.8, lantern: 0.85 })[thing as string] ?? 0.8;
 		let d = size * 2;
 		const eye = centre.clone().addScaledVector(dir, d);
