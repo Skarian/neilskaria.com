@@ -106,9 +106,11 @@ def rounded_profile(w, t, r, steps=4):
 	return pts
 
 
-def place_group(objs, loc, rot_z):
+def place_group(objs, loc, rot_z, scale=1.0):
 	"""Move objects built around the origin to a spot on the table (loc in scene units)."""
-	m = Matrix.Translation(loc) @ Matrix.Rotation(rot_z, 4, 'Z')
+	m = Matrix.Translation(loc) @ Matrix.Rotation(rot_z, 4, 'Z') @ Matrix.Scale(scale, 4)
+	# Objects placed by setting location/rotation have stale world matrices until an update.
+	bpy.context.view_layer.update()
 	for o in objs:
 		o.matrix_world = m @ o.matrix_world
 
@@ -399,17 +401,17 @@ def bonsai(bake_albedo, seed=11):
 	bake_albedo(soil, 256)
 	objs.append(soil)
 	clumps = []
-	moss_mat = material('BonsaiMossBright', (0.08, 0.15, 0.03), roughness=0.95)
-	for _ in range(70):
+	moss_mats = [material('BonsaiMossBright', (0.08, 0.15, 0.03), roughness=0.95), material('BonsaiMossDark', (0.04, 0.08, 0.02), roughness=0.95)]
+	for _ in range(150):
 		a, r = rng.uniform(0, 2 * math.pi), math.sqrt(rng.uniform(0.02, 0.85))
 		x, y = math.cos(a) * r * 90, math.sin(a) * r * 60
 		mound = max(0, 1 - math.hypot(x / 94 - 0.05, y / 64) / 0.6) ** 1.6
 		bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=1, location=mm(x, y, 30 + 11 * mound))
 		clump = bpy.context.active_object
-		size = rng.uniform(2.5, 6.0)
+		size = rng.uniform(1.4, 3.2)
 		clump.scale = mm(size * rng.uniform(0.8, 1.3), size * rng.uniform(0.8, 1.3), size * 0.45)
 		bpy.ops.object.transform_apply(scale=True)
-		clumps.append(finish(clump, 'BonsaiMossClump', moss_mat))
+		clumps.append(finish(clump, 'BonsaiMossClump', rng.choice(moss_mats)))
 	objs.append(join(clumps, 'BonsaiMoss'))
 
 	# Trunk and branches: twisting curves with tapering radius, flaring into roots at the soil.
@@ -617,31 +619,150 @@ def tuft(p, n, rng):
 	return tris
 
 
-def build(bake_albedo, top):
+def build(bake_albedo, top, woodgrain):
 	"""Build every prop and place it on the bedside table (whose top is at z = top).
 	Returns (lightmapped props, bonsai foliage with its own prepared lightmap UVs, unbaked objects)."""
 	baked, foliage_all, unbaked = [], [], []
 
 	cube = rubiks()
-	place_group(cube, Vector((-1.95, -0.75, top)), math.radians(-28))
-	baked += cube
+	place_group(cube, Vector((-2.4, -0.9, top)), math.radians(-28))
+	unbaked += cube
 
-	# A retro LED alarm clock (placeholder for the look tests), front-right, facing the camera.
-	clock_body, clock_digits = alarm_clock()
-	place_group([clock_body, clock_digits], Vector((1.25, -1.1, top)), math.radians(16))
-	baked.append(clock_body)
-	unbaked.append(clock_digits)
+	# The clock radio, back-left, angled towards the camera.
+	clock_body, clock_display, clock_digits, clock_parts = clock_radio(woodgrain)
+	place_group([clock_body, clock_display, clock_digits, *clock_parts], Vector((-1.45, 1.0, top)), math.radians(18))
+	baked += [clock_body, *clock_parts]
+	unbaked += [clock_display, clock_digits]
 
 	solid, chrome = tumbler()
-	place_group([solid, chrome], Vector((2.35, -0.15, top)), math.radians(12))
+	place_group([solid, chrome], Vector((2.15, 1.3, top)), math.radians(12))
 	baked.append(solid)
 	unbaked.append(chrome)
 
 	wood_and_pot, foliage = bonsai(bake_albedo)
-	place_group(wood_and_pot + foliage, Vector((-1.7, 1.05, top)), math.radians(6))
+	# At the right edge, scaled down a little, so its cascade hangs off the side of the table.
+	place_group(wood_and_pot + foliage, Vector((1.88, -0.6, top)), math.radians(6), 0.8)
 	baked += wood_and_pot
 	foliage_all += foliage
 	return baked, foliage_all, unbaked
+
+
+# A kumiko lantern: a dark wood frame holding light wood asanoha (hemp-leaf) lattice panels, with
+# washi paper inside lit by a warm bulb. About 140 x 140 x 240 mm.
+
+
+def asanoha_segments(width, height, side):
+	"""Line segments of an asanoha pattern covering a width x height panel (mm, origin bottom-left):
+	an equilateral triangle grid with spokes from each triangle's corners to its centre."""
+	col = side * math.sqrt(3) / 2
+	cols = int(width / col) + 3
+	rows = int(height / side) + 3
+	points = lambda i: [Vector(((i - 1) * col, (j - 1) * side + (i % 2) * side / 2)) for j in range(rows)]  # noqa: E731
+	segments = set()
+
+	def add(a, b):
+		key = tuple(sorted([(round(a.x, 3), round(a.y, 3)), (round(b.x, 3), round(b.y, 3))]))
+		segments.add(key)
+
+	for i in range(cols):
+		left, right = points(i), points(i + 1)
+		strip = sorted(left + right, key=lambda p: p.y)
+		for a, b, c in zip(strip, strip[1:], strip[2:]):
+			centre = (a + b + c) / 3
+			for p, q in ((a, b), (b, c), (c, a)):
+				add(p, q)
+			for p in (a, b, c):
+				add(p, centre)
+	clipped = []
+	for (ax, ay), (bx, by) in segments:
+		seg = clip(Vector((ax, ay)), Vector((bx, by)), width, height)
+		if seg and (seg[1] - seg[0]).length > 0.5:
+			clipped.append(seg)
+	return clipped
+
+
+def clip(a, b, width, height):
+	"""Liang–Barsky clip of segment a-b to the rectangle [0, width] x [0, height]."""
+	d = b - a
+	t0, t1 = 0.0, 1.0
+	for p, q in ((-d.x, a.x), (d.x, width - a.x), (-d.y, a.y), (d.y, height - a.y)):
+		if abs(p) < 1e-9:
+			if q < 0:
+				return None
+			continue
+		t = q / p
+		if p < 0:
+			t0 = max(t0, t)
+		else:
+			t1 = min(t1, t)
+		if t0 > t1:
+			return None
+	return a + d * t0, a + d * t1
+
+
+def add_bar(bm, a, b, frame, width, depth):
+	"""A thin slat along 2D segment a-b of a panel. frame = (origin, u, v, n) in mm."""
+	origin, u, v, n = frame
+	p0, p1 = origin + u * a.x + v * a.y, origin + u * b.x + v * b.y
+	along = (p1 - p0).normalized()
+	side = along.cross(n).normalized() * width / 2
+	inward = -n * depth
+	corners = []
+	for p in (p0, p1):
+		for s in (side, -side):
+			for d in (Vector((0, 0, 0)), inward):
+				corners.append(bm.verts.new(mm(*(p + s + d))))
+	v000, v001, v010, v011, v100, v101, v110, v111 = corners
+	for face in [(v000, v010, v110, v100), (v001, v101, v111, v011), (v000, v100, v101, v001), (v010, v011, v111, v110), (v000, v001, v011, v010), (v100, v110, v111, v101)]:
+		bm.faces.new(face)
+
+
+def kumiko_lantern():
+	dark = material('KumikoFrame', (0.06, 0.035, 0.02), roughness=0.55)
+	light = material('KumikoLattice', (0.6, 0.44, 0.27), roughness=0.6)
+	paper = material('LanternPaper', (1.0, 0.92, 0.8), roughness=0.9, emission=(1.0, 0.6, 0.28))
+	paper.node_tree.nodes['Principled BSDF'].inputs['Emission Strength'].default_value = 5.0
+	OUT, POST, H, BASE = 70.0, 11.0, 240.0, 16.0
+
+	parts = [box('KumikoBase', mm(2 * OUT - 6, 2 * OUT - 6, BASE), mm(0, 0, BASE / 2), dark, bevel=1.2 * U)]
+	for sx in (-1, 1):
+		for sy in (-1, 1):
+			parts.append(box('KumikoPost', mm(POST, POST, H - BASE), mm(sx * (OUT - POST / 2), sy * (OUT - POST / 2), BASE + (H - BASE) / 2), dark, bevel=0.8 * U))
+	for z in (BASE + 4, H - 5):
+		for axis in ('x', 'y'):
+			for s in (-1, 1):
+				size = mm(2 * OUT, POST, 8) if axis == 'x' else mm(POST, 2 * OUT, 8)
+				loc = mm(0, s * (OUT - POST / 2), z) if axis == 'x' else mm(s * (OUT - POST / 2), 0, z)
+				parts.append(box('KumikoRail', size, loc, dark, bevel=0.8 * U))
+	frame = join(parts, 'KumikoFrame')
+
+	inner = OUT - POST
+	z0, z1 = BASE + 8, H - 9
+	panel_h = z1 - z0
+	panels = [
+		(Vector((-inner, -OUT + 3, z0)), Vector((1, 0, 0)), Vector((0, 0, 1)), Vector((0, -1, 0)), 2 * inner, panel_h),
+		(Vector((inner, OUT - 3, z0)), Vector((-1, 0, 0)), Vector((0, 0, 1)), Vector((0, 1, 0)), 2 * inner, panel_h),
+		(Vector((-OUT + 3, inner, z0)), Vector((0, -1, 0)), Vector((0, 0, 1)), Vector((-1, 0, 0)), 2 * inner, panel_h),
+		(Vector((OUT - 3, -inner, z0)), Vector((0, 1, 0)), Vector((0, 0, 1)), Vector((1, 0, 0)), 2 * inner, panel_h),
+		(Vector((-inner, -inner, H - 2)), Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1)), 2 * inner, 2 * inner),
+	]
+	bm = bmesh.new()
+	for origin, u, v, n, w, h in panels:
+		for a, b in asanoha_segments(w, h, 34.0):
+			add_bar(bm, a, b, (origin, u, v, n), 1.3, 4.0)
+		# A slim inner border around each panel.
+		for a, b in [(Vector((0, 0)), Vector((w, 0))), (Vector((w, 0)), Vector((w, h))), (Vector((w, h)), Vector((0, h))), (Vector((0, h)), Vector((0, 0)))]:
+			add_bar(bm, a, b, (origin, u, v, n), 2.5, 4.0)
+	mesh = bpy.data.meshes.new('KumikoLattice')
+	bm.to_mesh(mesh)
+	bm.free()
+	lattice = link(bpy.data.objects.new('KumikoLattice', mesh))
+	lattice.data.materials.append(light)
+
+	# Washi paper behind the lattice: lets the bulb's light through in the bake, glows on the site.
+	paper_box = box('LanternPaper', mm(2 * inner + 4, 2 * inner + 4, panel_h), mm(0, 0, z0 + panel_h / 2), paper)
+	paper_box.visible_shadow = False
+	return [frame, lattice], paper_box, mm(0, 0, z0 + panel_h * 0.45)
 
 
 # A kumiko lantern: a dark wood frame holding light wood asanoha (hemp-leaf) lattice panels, with
@@ -774,3 +895,106 @@ def alarm_clock():
 	digits.rotation_euler = (math.radians(90), 0, 0)
 	digits.location = mm(0, -34.2, 31)
 	return join([body, face], 'AlarmClock'), digits
+
+
+# Mid-century furniture: oak, soft radiused edges, splayed tapered legs.
+
+
+def tapered_leg(name, top, bottom, r_top, r_bottom, mat):
+	"""A round tapered leg from point `top` to point `bottom` (scene units)."""
+	top, bottom = Vector(top), Vector(bottom)
+	axis = top - bottom
+	bpy.ops.mesh.primitive_cone_add(vertices=24, radius1=r_bottom, radius2=r_top, depth=axis.length, location=(top + bottom) / 2)
+	leg = bpy.context.active_object
+	leg.rotation_euler = axis.to_track_quat('Z', 'Y').to_euler()
+	bpy.ops.object.transform_apply(rotation=True)
+	return finish(leg, name, mat, bevel=min(r_bottom, r_top) * 0.4, segments=2)
+
+
+def mcm_nightstand(oak):
+	"""A 560 x 420 x 700 mm mid-century nightstand: a radiused oak case with a drawer over an open
+	shelf, on four splayed tapered legs. Built with the floor at z = 0, centred on the origin."""
+	W, D, Z0, Z1 = 560.0, 420.0, 290.0, 700.0
+	body = box('NightstandCase', mm(W, D, Z1 - Z0), mm(0, 0, (Z0 + Z1) / 2), oak, bevel=12 * U, segments=4)
+	apply_modifiers(body)
+	# The open shelf below the drawer.
+	cut(body, box('cutter', mm(W - 56, D, 180), mm(0, -40, 412), None, bevel=6 * U))
+	# A shallow recess for the drawer front, so it reads with a shadow gap all round.
+	cut(body, box('cutter', mm(W - 52, 20, 160), mm(0, -D / 2, 604), None))
+	drawer = box('NightstandDrawer', mm(W - 60, 18, 152), mm(0, -D / 2 + 4, 604), oak, bevel=3 * U)
+	apply_modifiers(drawer)
+	# A sculpted finger pull along the drawer's top edge.
+	cut(drawer, box('cutter', mm(150, 40, 36), mm(0, -D / 2 - 8, 682), None, bevel=10 * U))
+	parts = [body, drawer]
+	for sx in (-1, 1):
+		for sy in (-1, 1):
+			x, y = sx * (W / 2 - 60), sy * (D / 2 - 60)
+			splay = 300 * math.tan(math.radians(7)) / math.sqrt(2)
+			parts.append(tapered_leg('NightstandLeg', mm(x, y, Z0 + 10), mm(x + sx * splay, y + sy * splay, 0), 17 * U, 10 * U, oak))
+	return join(parts, 'Nightstand')
+
+
+def clock_radio(woodgrain):
+	"""An '80s digital clock radio, after the GE 7-4612: a dark brown case with a woodgrain top cut by
+	speaker slots, a snooze bar, slide switches, a red LED display and an AM/FM dial strip.
+	Built facing -Y, sitting at z = 0. Returns (body, display plane, preview digits, moving parts):
+	the snooze bar, five slide switches (ClockSwitch0-4) and the tuning wheel are separate objects."""
+	plastic = material('ClockPlastic', (0.03, 0.022, 0.018), roughness=0.45)
+	smoke = material('ClockGlass', (0.035, 0.004, 0.004), roughness=0.06)
+	dial = material('ClockDial', (0.012, 0.01, 0.01), roughness=0.1)
+	ink = material('ClockPrint', (0.72, 0.68, 0.6), roughness=0.5)
+	red = material('ClockPointer', (0.8, 0.05, 0.03), roughness=0.4)
+	W, D, H = 262.0, 120.0, 66.0
+
+	body = box('ClockCase', mm(W, D, H), mm(0, 0, H / 2), plastic, bevel=5 * U, segments=3)
+	top = box('ClockTop', mm(W - 14, D - 26, 4), mm(0, 8, H + 1.2), woodgrain, bevel=1.2 * U)
+	apply_modifiers(top)
+	# Speaker slots across most of the top.
+	for k in range(9):
+		cut(top, box('cutter', mm(158, 3.2, 8), mm(-38, 34 - k * 7.2, H + 3), None, bevel=1.2 * U))
+	parts = [body, top]
+	moving = [box('ClockSnooze', mm(66, 14, 7), mm(78, 30, H + 5), plastic, bevel=3 * U)]
+	# A row of slide switches along the front of the top, each in its own slot.
+	for k in range(5):
+		x = -110 + k * 22
+		cut(top, box('cutter', mm(8, 18, 8), mm(x, -D / 2 + 21, H + 3), None))
+		moving.append(box(f'ClockSwitch{k}', mm(6, 7, 6), mm(x, -D / 2 + 17, H + 2), plastic, bevel=1.5 * U))
+	# The tuning wheel, a ribbed thumbwheel standing proud of the right end.
+	wheel = cylinder('ClockWheel', 15 * U, 6 * U, mm(W / 2 - 1, -18, 36), plastic, rot=(0, math.radians(90), 0), bevel=1 * U, verts=40)
+	apply_modifiers(wheel)
+	for k in range(20):
+		a = 2 * math.pi * k / 20
+		cut(wheel, box('cutter', mm(8, 1.4, 3), mm(W / 2 - 1, -18 + 15.5 * math.cos(a), 36 + 15.5 * math.sin(a)), None, rot=(a, 0, 0)))
+	moving.append(wheel)
+	# The front: a smoked display window on the left, the dial strip on the right.
+	parts.append(box('ClockWindow', mm(96, 0.8, 34), mm(-62, -D / 2 - 0.2, 32), smoke, bevel=0.3 * U))
+	parts.append(box('ClockDialStrip', mm(118, 2, 24), mm(58, -D / 2 - 0.6, 32), dial, bevel=1 * U))
+	z = -D / 2 - 1.8
+	for name, body_text, size, x, zz in [
+		('ClockFM', 'FM 88  92  96  100  104  108', 3.4, 58, 37),
+		('ClockAM', 'AM 55  65  80  100  130  160', 3.4, 58, 27),
+		('ClockLabelAM', 'AM', 3.0, -120, 40),
+		('ClockLabelPM', 'PM', 3.0, -120, 24),
+	]:
+		text = label(name, body_text, size, (0, 0, 0), ink, 'C:/Windows/Fonts/arialbd.ttf')
+		text.rotation_euler = (math.radians(90), 0, 0)
+		text.location = mm(x, z, zz)
+		parts.append(text)
+	parts.append(box('ClockPointerLine', mm(1.2, 1, 20), mm(70, z, 32), red))
+	body = join(parts, 'ClockRadio')
+
+	# The display: the site draws the visitor's time onto this plane; the digits are for previews.
+	w, h = 86 * U / 2, 26 * U / 2
+	mesh = bpy.data.meshes.new('ClockDisplay')
+	mesh.from_pydata([(-w, 0, -h), (w, 0, -h), (w, 0, h), (-w, 0, h)], [], [(0, 1, 2, 3)])
+	uv = mesh.uv_layers.new(name='UVMap')
+	for li, (u, v) in zip(range(4), [(0, 0), (1, 0), (1, 1), (0, 1)]):
+		uv.data[li].uv = (u, v)
+	display = finish(link(bpy.data.objects.new('ClockDisplay', mesh)), 'ClockDisplay', material('ClockDisplay', (0.02, 0.0, 0.0), roughness=0.3))
+	display.location = mm(-62, -D / 2 - 0.8, 32)
+	led = material('ClockLED', (1.0, 0.05, 0.02), emission=(1.0, 0.07, 0.02))
+	led.node_tree.nodes['Principled BSDF'].inputs['Emission Strength'].default_value = 10.0
+	digits = label('ClockDigits', '1:10', 26, (0, 0, 0), led, 'C:/Windows/Fonts/bahnschrift.ttf')
+	digits.rotation_euler = (math.radians(90), 0, 0)
+	digits.location = mm(-62, -D / 2 - 1.0, 32)
+	return body, display, digits, moving

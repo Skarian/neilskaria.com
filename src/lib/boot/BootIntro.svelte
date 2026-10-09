@@ -1,85 +1,87 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
-	import type { IntroEngine } from './engine';
-	import posterLandscape from './assets/poster-landscape.webp?url';
-	import posterPortrait from './assets/poster-portrait.webp?url';
-	import { prefetchIntro } from './prefetch';
+	import { onMount } from 'svelte';
+	import type { Hover, Room, RoomMode } from './engine';
+	import { room } from './room.svelte';
 
-	// The intro's start screen. The 3D engine itself is only downloaded when the intro plays: first
-	// visits play it, returning visitors go straight to the page (the engine is prefetched in the
-	// background), and "Replay intro" (an `intro:replay` event) plays it on demand.
+	// The room: the site's 3D home screen. A first visit loads it (behind a dark loading screen) and
+	// starts there; clicking the Game Boy (or START) boots into the page. Returning visitors land on
+	// the page, and the room loads quietly in the background so "Back to the room" is instant.
 
 	// The colour the boot screen fades to; it should match the page underneath.
 	let { background }: { background: string } = $props();
 
 	const SEEN_KEY = 'boot-seen';
 	const MUTED_KEY = 'boot-muted';
-	// Runs before the page is painted, so a first visit shows the start screen straight away and a
+	// Runs before the page is painted, so a first visit shows the loading screen straight away and a
 	// returning visit never flashes it.
 	const headScript =
 		`<script>try{if(localStorage.getItem('${SEEN_KEY}')!=='1'&&!matchMedia('(prefers-reduced-motion: reduce)').matches)document.documentElement.dataset.intro='play'}catch(e){}</scr` +
 		'ipt>'; // split so this file's own script tag doesn't end here
 
+	type NetworkInformation = { saveData?: boolean; effectiveType?: string };
+
 	let canvas = $state<HTMLCanvasElement>();
-	// Each run gets a fresh canvas: the previous one's WebGL context is destroyed to free the GPU.
-	let run = $state(0);
 	let layer = $state<HTMLDivElement>();
-	let phase = $state<'idle' | 'loading' | 'ready' | 'playing'>('idle');
+	let phase = $state<'page' | 'loading' | 'room' | 'moving'>('page');
 	let progress = $state(0);
 	let muted = $state(false);
-	let engine: IntroEngine | undefined;
-	let cancelled = false;
+	let pressed = $state(false);
+	let hover = $state<Hover>(null);
+	let engine: Room | undefined;
 
-	async function begin() {
-		if (phase !== 'idle') return;
+	function show() {
 		document.documentElement.dataset.intro = 'play';
-		// No page scrolling (or scrollbar) while the intro covers the page.
+		// No page scrolling (or scrollbar) while the room covers the page.
 		document.documentElement.style.overflow = 'hidden';
-		layer!.style.opacity = '1';
-		cancelled = false;
-		progress = 0;
-		phase = 'loading';
-		run += 1;
-		await tick();
-		try {
-			const { createIntro } = await import('./engine');
-			const created = await createIntro({
-				canvas: canvas!,
-				layer: layer!,
-				background,
-				muted,
-				onProgress: (value) => (progress = value),
-				onDone: done
-			});
-			if (cancelled) return created.dispose();
-			engine = created;
-			phase = 'ready';
-		} catch (error) {
-			console.error('Intro failed to load', error);
-			done();
-		}
+	}
+
+	function hide() {
+		delete document.documentElement.dataset.intro;
+		document.documentElement.style.overflow = '';
+	}
+
+	async function load(startIn: 'room' | 'site') {
+		const { createRoom } = await import('./engine');
+		engine = await createRoom({
+			canvas: canvas!,
+			layer: layer!,
+			background,
+			muted,
+			startIn,
+			onProgress: (value) => (progress = value),
+			onMode,
+			onHover: (value) => (hover = value)
+		});
+	}
+
+	function onMode(mode: RoomMode) {
+		if (mode === 'room') phase = 'room';
+		else if (mode === 'site') {
+			phase = 'page';
+			hover = null;
+			localStorage.setItem(SEEN_KEY, '1');
+			hide();
+			room.ready = true;
+			room.open = openRoom;
+		} else phase = 'moving';
+	}
+
+	function openRoom() {
+		if (!engine || phase !== 'page') return;
+		// Start invisible; the reverse animation fades the room in over the page.
+		layer!.style.opacity = '0';
+		show();
+		engine.returnToRoom();
 	}
 
 	function start() {
-		if (phase !== 'ready' || !engine) return;
-		phase = 'playing';
-		engine.start();
-	}
-
-	function skip() {
-		if (engine) engine.skip();
-		else {
-			cancelled = true;
-			done();
-		}
-	}
-
-	function done() {
-		engine = undefined;
-		phase = 'idle';
-		localStorage.setItem(SEEN_KEY, '1');
-		delete document.documentElement.dataset.intro;
-		document.documentElement.style.overflow = '';
+		if (phase !== 'room' || pressed) return;
+		// Let the button visibly press before the room starts moving.
+		pressed = true;
+		setTimeout(() => {
+			pressed = false;
+			engine?.enterSite();
+		}, 160);
 	}
 
 	function toggleSound() {
@@ -89,12 +91,12 @@
 	}
 
 	function keydown(event: KeyboardEvent) {
-		if (phase === 'idle') return;
-		if (phase === 'ready' && (event.key === 'Enter' || event.key === ' ')) {
+		if (phase === 'page') return;
+		if (phase === 'room' && (event.key === 'Enter' || event.key === ' ')) {
 			event.preventDefault();
 			start();
 		} else if (event.key === 'Escape') {
-			skip();
+			engine?.skipToSite();
 		} else if (event.key === 'm' || event.key === 'M') {
 			toggleSound();
 		}
@@ -103,15 +105,32 @@
 	onMount(() => {
 		muted = localStorage.getItem(MUTED_KEY) === '1';
 		const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-		// The head script only runs on a full page load, so check again for client-side navigation.
 		const firstVisit = localStorage.getItem(SEEN_KEY) !== '1' && !reduced;
-		if (document.documentElement.dataset.intro === 'play' || firstVisit) begin();
-		else prefetchIntro();
 
-		addEventListener('intro:replay', begin);
+		if (firstVisit) {
+			show();
+			phase = 'loading';
+			load('room').catch((error) => {
+				console.error('The room failed to load', error);
+				hide();
+				phase = 'page';
+			});
+		} else if (!reduced) {
+			// Load the room in the background once the page is idle, unless data is precious.
+			const connection = (navigator as Navigator & { connection?: NetworkInformation }).connection;
+			const slow = connection?.saveData || /(^|-)2g$/.test(connection?.effectiveType ?? '');
+			if (!slow) {
+				const run = () =>
+					load('site')
+						.then(() => onMode('site'))
+						.catch((error) => console.error('The room failed to load', error));
+				if ('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 4000 });
+				else setTimeout(run, 2000);
+			}
+		}
 		return () => {
-			removeEventListener('intro:replay', begin);
 			engine?.dispose();
+			room.ready = false;
 		};
 	});
 </script>
@@ -123,59 +142,45 @@
 
 <svelte:window onkeydown={keydown} />
 
-<!-- A still of the room shows straight away; the live scene fades in over it once it's loaded. -->
-<div
-	bind:this={layer}
-	class="boot-intro"
-	aria-hidden={phase === 'idle'}
-	style:--poster-landscape="url({posterLandscape})"
-	style:--poster-portrait="url({posterPortrait})"
->
-	{#key run}
-		<canvas bind:this={canvas} class:live={phase === 'ready' || phase === 'playing'}></canvas>
-	{/key}
+<div bind:this={layer} class="room-layer" aria-hidden={phase === 'page'}>
+	<canvas bind:this={canvas} class:live={phase !== 'loading'}></canvas>
 
-	{#if phase !== 'playing'}
-		<div class="start-screen">
-			<button
-				class="start"
-				disabled={phase !== 'ready'}
-				aria-label="Start"
-				onclick={start}
-				data-start
-			></button>
-			<span class="label" aria-live="polite">
-				{phase === 'ready' ? 'PRESS START' : `LOADING ${Math.round(progress * 100)}%`}
-			</span>
+	{#if phase === 'loading'}
+		<p class="loading" aria-live="polite">LOADING {Math.round(progress * 100)}%</p>
+	{/if}
+
+	{#if phase === 'room'}
+		<div class="start">
+			<button class:pressed onclick={start} aria-label="Start: open the site">START</button>
+			<p>or click the Game Boy</p>
 		</div>
+	{/if}
+
+	{#if hover && phase === 'room'}
+		<p class="label" style:left="{hover.x}px" style:top="{hover.y}px">{hover.label}</p>
 	{/if}
 
 	<div class="corner">
 		<button onclick={toggleSound} aria-pressed={!muted}>{muted ? 'SOUND OFF' : 'SOUND ON'}</button>
-		<button onclick={skip}>SKIP INTRO</button>
+		{#if phase !== 'page'}
+			<button onclick={() => engine?.skipToSite()}>SKIP TO SITE</button>
+		{/if}
 	</div>
 </div>
 
 <style>
-	.boot-intro {
+	.room-layer {
 		display: none;
 		position: fixed;
 		inset: 0;
 		z-index: 50;
-		/* Background images aren't fetched while this is hidden, so return visits never load them. */
-		background: #1a1830 var(--poster-landscape) center / cover no-repeat;
+		background: #0b0a0e;
 		font-family: ui-monospace, monospace;
-		color: #eff1f5;
+		color: #f3ece2;
 	}
 
-	:global(html[data-intro]) .boot-intro {
+	:global(html[data-intro]) .room-layer {
 		display: block;
-	}
-
-	@media (orientation: portrait) {
-		.boot-intro {
-			background-image: var(--poster-portrait);
-		}
 	}
 
 	canvas {
@@ -184,72 +189,96 @@
 		width: 100%;
 		height: 100%;
 		opacity: 0;
-		transition: opacity 0.4s ease;
+		transition: opacity 0.9s ease;
 	}
 
 	canvas.live {
 		opacity: 1;
 	}
 
-	.start-screen {
+	.loading {
 		position: absolute;
-		inset: 0;
+		left: 50%;
+		top: 50%;
+		translate: -50% -50%;
+		font-size: 0.75rem;
+		letter-spacing: 0.3em;
+		color: rgb(243 236 226 / 0.65);
+		animation: blink 1.2s steps(2) infinite;
+	}
+
+	.start {
+		position: absolute;
+		left: 50%;
+		bottom: 9vh;
+		translate: -50% 0;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		justify-content: flex-end;
-		gap: 1.1rem;
-		padding-bottom: 14vh;
-		/* Enough shade behind the button to read against the daylit room. */
-		background: radial-gradient(ellipse 50% 32% at 50% 86%, rgb(20 16 40 / 0.5), transparent 70%);
+		gap: 0.7rem;
+		animation: rise 0.8s 0.5s both cubic-bezier(0.2, 0.7, 0.2, 1);
 	}
 
-	/* An angled rubber pill, like the START button on a Game Boy. */
-	.start {
-		width: 72px;
-		height: 22px;
+	/* A chunky Game Boy-style rubber pill with START on it, which visibly presses. */
+	.start button {
+		padding: 0.7rem 2.2rem;
 		border-radius: 999px;
-		transform: rotate(-25deg);
+		font-family: 'Arial Black', 'Helvetica Neue', Arial, sans-serif;
+		font-style: italic;
+		font-size: 0.95rem;
+		letter-spacing: 0.18em;
+		color: #e9e3da;
 		cursor: pointer;
-		background: linear-gradient(180deg, #6b6872, #3a3840 55%, #2b2930);
+		background: linear-gradient(180deg, #5d5a63, #3a3840 55%, #2b2930);
 		box-shadow:
-			0 4px 0 #18161c,
-			0 6px 12px rgb(0 0 0 / 0.45),
-			inset 0 1px 0 rgb(255 255 255 / 0.25);
+			0 5px 0 #17151b,
+			0 8px 18px rgb(0 0 0 / 0.5),
+			inset 0 1px 0 rgb(255 255 255 / 0.22);
 		transition:
-			transform 0.08s,
-			box-shadow 0.08s,
-			opacity 0.3s;
+			translate 0.08s,
+			box-shadow 0.08s;
 	}
 
-	.start:not(:disabled) {
-		animation: breathe 1.8s ease-in-out infinite;
-	}
-
-	.start:active:not(:disabled) {
-		transform: rotate(-25deg) translateY(3px);
+	.start button:hover {
 		box-shadow:
-			0 1px 0 #18161c,
-			0 2px 6px rgb(0 0 0 / 0.45),
-			inset 0 1px 0 rgb(255 255 255 / 0.2);
+			0 5px 0 #17151b,
+			0 8px 18px rgb(0 0 0 / 0.5),
+			0 0 22px rgb(255 170 90 / 0.45),
+			inset 0 1px 0 rgb(255 255 255 / 0.22);
 	}
 
-	.start:disabled {
-		cursor: default;
-		opacity: 0.45;
+	.start button:active,
+	.start button.pressed {
+		translate: 0 4px;
+		box-shadow:
+			0 1px 0 #17151b,
+			0 3px 8px rgb(0 0 0 / 0.5),
+			inset 0 1px 0 rgb(255 255 255 / 0.15);
 	}
 
-	.start:focus-visible {
-		outline: 2px solid #f5c2e7;
-		outline-offset: 6px;
+	.start button:focus-visible {
+		outline: 2px solid #ffb070;
+		outline-offset: 5px;
+	}
+
+	.start p {
+		font-size: 0.7rem;
+		letter-spacing: 0.12em;
+		color: rgb(243 236 226 / 0.7);
+		text-shadow: 0 1px 6px rgb(0 0 0 / 0.6);
 	}
 
 	.label {
-		font-family: 'Arial Black', 'Helvetica Neue', Arial, sans-serif;
-		font-style: italic;
+		position: fixed;
+		translate: 14px 14px;
+		padding: 0.35rem 0.6rem;
+		border-radius: 6px;
 		font-size: 0.7rem;
-		letter-spacing: 0.16em;
-		color: rgb(239 241 245 / 0.9);
+		letter-spacing: 0.06em;
+		white-space: nowrap;
+		pointer-events: none;
+		background: rgb(14 11 9 / 0.75);
+		box-shadow: 0 4px 14px rgb(0 0 0 / 0.35);
 	}
 
 	.corner {
@@ -264,25 +293,30 @@
 
 	.corner button {
 		cursor: pointer;
-		color: rgb(205 208 245 / 0.7);
+		color: rgb(243 236 226 / 0.65);
+		text-shadow: 0 1px 6px rgb(0 0 0 / 0.6);
 	}
 
 	.corner button:hover {
-		color: #eff1f5;
+		color: #fff;
 	}
 
-	@keyframes breathe {
+	@keyframes blink {
 		50% {
-			box-shadow:
-				0 4px 0 #18161c,
-				0 6px 12px rgb(0 0 0 / 0.45),
-				0 0 18px rgb(245 194 231 / 0.55),
-				inset 0 1px 0 rgb(255 255 255 / 0.25);
+			opacity: 0.35;
+		}
+	}
+
+	@keyframes rise {
+		from {
+			opacity: 0;
+			translate: -50% 12px;
 		}
 	}
 
 	@media (prefers-reduced-motion: reduce) {
-		.start:not(:disabled) {
+		.loading,
+		.start {
 			animation: none;
 		}
 	}

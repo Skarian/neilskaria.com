@@ -1,39 +1,58 @@
-// The 3D intro: the bedroom, the SP lifting off the table, the boot screen and the dive into it.
-// This module (and Three.js with it) is code-split: it's only downloaded when the intro is about to
-// play, or prefetched in the background once a returning visitor's page is idle.
+// The room: the bedside table in 3D, the home screen of the site. Click the Game Boy Advance SP and it
+// lifts off the table, boots, and the camera dives into its screen to hand over to the page; going
+// back plays the same thing in reverse. While the page is showing, nothing renders.
+// This module (and Three.js with it) is code-split and only downloaded when the room is needed.
 
 import { gsap } from 'gsap';
 import * as THREE from 'three';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { introAssets, lightmapScales } from './assets';
-import { bakedMaterial, loadBakedLighting, type BakedLighting } from './baked-material';
+import { bakedMaterial, loadBakedLighting, swayTime, type BakedLighting } from './baked-material';
 import { BOOT_DURATION, drawBootScreen } from './boot-screen';
+import { drawClockLED } from './clock-led';
 import { createBootSound } from './sound';
-import { drawWatchLCD } from './watch-lcd';
 
-export type IntroOptions = {
+export type RoomMode = 'room' | 'booting' | 'site' | 'returning';
+export type Hover = { label: string; x: number; y: number } | null;
+
+export type RoomOptions = {
 	canvas: HTMLCanvasElement;
-	// Faded out at the end, so the page shows through.
+	// Faded out at the end of the boot, so the page shows through.
 	layer: HTMLElement;
 	// The colour the boot screen fades to; it should match the page underneath.
 	background: string;
 	muted: boolean;
+	// Start in the room, or already on the page (preloaded in the background, paused).
+	startIn: 'room' | 'site';
 	onProgress: (progress: number) => void;
-	onDone: () => void;
+	onMode: (mode: RoomMode) => void;
+	onHover: (hover: Hover) => void;
 };
 
-export type IntroEngine = {
-	start: () => void;
-	skip: () => void;
+export type Room = {
+	enterSite: () => void;
+	skipToSite: () => void;
+	returnToRoom: () => void;
 	setMuted: (muted: boolean) => void;
 	dispose: () => void;
+};
+
+type Thing = 'sp' | 'cube' | 'clock' | 'lantern' | 'bonsai';
+
+const LABELS: Record<Thing, string> = {
+	sp: 'Game Boy Advance SP · open the site',
+	cube: "Rubik's cube · coming soon",
+	clock: 'Clock radio · coming soon',
+	lantern: 'Kumiko lantern · click to switch',
+	bonsai: 'Bonsai · coming soon'
 };
 
 const OPEN = THREE.MathUtils.degToRad(150);
 const PITCH = OPEN - Math.PI / 2;
 const FLOAT = new THREE.Vector3(0, 1.45, 0.9);
 const CAMERA_NEAR = new THREE.Vector3(0.9, 1.9, 6);
+const LANTERN_PAPER = new THREE.Color('#ffa24a').multiplyScalar(1.15);
 
 // Landscape screens see the bed and the bedside table; portrait screens centre on the table.
 export function startView(aspect: number) {
@@ -42,8 +61,8 @@ export function startView(aspect: number) {
 		: { eye: new THREE.Vector3(4.2, 3.2, 14), target: new THREE.Vector3(-1.8, -0.6, 0) };
 }
 
-export async function createIntro(options: IntroOptions): Promise<IntroEngine> {
-	const { canvas, layer, background, onProgress, onDone } = options;
+export async function createRoom(options: RoomOptions): Promise<Room> {
+	const { canvas, layer, background, onProgress, onMode, onHover } = options;
 
 	const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 	renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -52,14 +71,11 @@ export async function createIntro(options: IntroOptions): Promise<IntroEngine> {
 	renderer.toneMappingExposure = 1.1;
 
 	const scene = new THREE.Scene();
-	scene.background = new THREE.Color('#1a1830');
+	scene.background = new THREE.Color('#120f0c');
 	const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.01, 200);
 	let view = startView(camera.aspect);
 	camera.position.copy(view.eye);
 	camera.lookAt(view.target);
-
-	// The room's lighting is baked (daylight). The console is lit by the room itself: reflections
-	// and ambient light captured from the baked room, so it sits in the same light.
 
 	const screenCanvas = document.createElement('canvas');
 	screenCanvas.width = 960;
@@ -70,7 +86,18 @@ export async function createIntro(options: IntroOptions): Promise<IntroEngine> {
 	screenTexture.flipY = false;
 	const screenMaterial = new THREE.MeshBasicMaterial({ color: '#1d201d', toneMapped: false });
 
-	// Animated values, all driven by the GSAP timeline.
+	// The clock radio shows the visitor's own time.
+	const clockCanvas = document.createElement('canvas');
+	clockCanvas.width = 512;
+	clockCanvas.height = 156;
+	const clockCtx = clockCanvas.getContext('2d')!;
+	const clockTexture = new THREE.CanvasTexture(clockCanvas);
+	clockTexture.colorSpace = THREE.SRGBColorSpace;
+	clockTexture.flipY = false;
+	const clockMaterial = new THREE.MeshBasicMaterial({ map: clockTexture, toneMapped: false });
+	let clockTick = -1;
+
+	// Animated values, all driven by GSAP.
 	const s = {
 		drift: 0,
 		rise: 0,
@@ -83,15 +110,20 @@ export async function createIntro(options: IntroOptions): Promise<IntroEngine> {
 		boot: -1,
 		dive: 0
 	};
-
-	const lampMix = { value: 0 };
+	const hover = { sp: 0 };
+	const lantern = { level: 1 };
+	const lampTint = { value: new THREE.Color(1, 1, 1) };
+	const pointer = new THREE.Vector2();
+	const parallax = new THREE.Vector2();
 	const nearQuat = new THREE.Quaternion();
 	const finalPos = new THREE.Vector3();
 	const finalQuat = new THREE.Quaternion();
+	let mode: RoomMode = options.startIn;
 	let timeline: gsap.core.Timeline | undefined;
+	let hovered: Thing | null = null;
 	let disposed = false;
 
-	// Load everything before the visitor can press Start, so the animation never stutters.
+	// Load everything up front, so nothing stutters once it's moving.
 	const draco = new DRACOLoader().setDecoderPath('/draco/');
 	const gltf = await new GLTFLoader()
 		.setDRACOLoader(draco)
@@ -104,7 +136,7 @@ export async function createIntro(options: IntroOptions): Promise<IntroEngine> {
 			group,
 			lightmapScales,
 			introAssets.lightmaps,
-			lampMix
+			lampTint
 		);
 	}
 	draco.dispose();
@@ -119,31 +151,16 @@ export async function createIntro(options: IntroOptions): Promise<IntroEngine> {
 	const cartRest = cart.position.clone();
 	const yaw = Math.atan2(CAMERA_NEAR.x - FLOAT.x, CAMERA_NEAR.z - FLOAT.z);
 	let ledMaterial: THREE.MeshStandardMaterial | undefined;
-	const reflective: THREE.MeshStandardMaterial[] = [];
-
-	// The Casio on the table shows the visitor's own time.
-	const watchCanvas = document.createElement('canvas');
-	watchCanvas.width = 512;
-	watchCanvas.height = 242;
-	const watchCtx = watchCanvas.getContext('2d')!;
-	const watchTexture = new THREE.CanvasTexture(watchCanvas);
-	watchTexture.colorSpace = THREE.SRGBColorSpace;
-	watchTexture.flipY = false;
-	watchTexture.anisotropy = 4;
-	const watchMaterial = new THREE.MeshBasicMaterial({ map: watchTexture });
-	let watchSecond = -1;
+	const paperMaterials: THREE.MeshBasicMaterial[] = [];
+	const live: THREE.MeshStandardMaterial[] = [];
 
 	const baked: Record<string, THREE.Material> = {};
-	const glows: Record<string, THREE.Color> = {
-		Bulb: new THREE.Color('#ffd9a8').multiplyScalar(4),
-		LampShade: new THREE.Color('#ffb070').multiplyScalar(1.1)
-	};
 	gltf.scene.traverse((object) => {
 		if (!(object instanceof THREE.Mesh)) return;
 		// glTF splits multi-material objects into child meshes, so the tag can sit on the parent.
 		const group = object.userData.lightmap ?? object.parent?.userData.lightmap;
-		const name = glows[object.name] ? object.name : object.parent?.name;
-		if (group && /glass/i.test(object.material.name)) {
+		const name = object.material.name as string;
+		if (group && /glass/i.test(name)) {
 			// Glass can't be baked (light passes through it), so it's drawn as a faint clear layer.
 			object.material = new THREE.MeshBasicMaterial({
 				color: '#ffffff',
@@ -152,26 +169,26 @@ export async function createIntro(options: IntroOptions): Promise<IntroEngine> {
 				depthWrite: false
 			});
 		} else if (group) {
-			const key = `${object.material.uuid}:${group}:${name}`;
-			baked[key] ??= bakedMaterial(object.material, lighting[group], glows[name ?? '']);
+			const key = `${object.material.uuid}:${group}`;
+			baked[key] ??= bakedMaterial(object.material, lighting[group], { sway: group === 'foliage' });
 			object.material = baked[key];
 		} else if (object.name === 'Sky') {
 			object.material = new THREE.MeshBasicMaterial({
 				map: (object.material as THREE.MeshStandardMaterial).map
 			});
-		} else if (object.material.name === 'ShellRed') {
+		} else if (name === 'ShellRed') {
 			// The SP's pearlescent plastic: a little metallic, under a clear coat.
 			object.material = new THREE.MeshPhysicalMaterial({
-				name: 'ShellRed',
+				name,
 				color: (object.material as THREE.MeshStandardMaterial).color,
 				roughness: 0.35,
 				metalness: 0.15,
 				clearcoat: 0.5,
 				clearcoatRoughness: 0.15
 			});
-		} else if (object.material.name === 'ScreenCover') {
+		} else if (name === 'ScreenCover') {
 			object.material = new THREE.MeshPhysicalMaterial({
-				name: 'ScreenCover',
+				name,
 				color: '#060608',
 				roughness: 0.05,
 				clearcoat: 1
@@ -179,22 +196,24 @@ export async function createIntro(options: IntroOptions): Promise<IntroEngine> {
 		} else if (object.name === 'PowerLed') {
 			object.material = object.material.clone();
 			ledMaterial = object.material;
-		} else if (object.material.name === 'Chrome') {
-			// Polished steel (the tumbler's base band) is lit by reflections, like the console.
+		} else if (name === 'Chrome') {
+			// Polished steel (the tumbler's base band) is lit by reflections.
 			object.material = new THREE.MeshStandardMaterial({
 				color: '#d4d6da',
 				metalness: 1,
 				roughness: 0.25
 			});
-			reflective.push(object.material);
-		} else if (object.material.name === 'LanternPaper') {
+		} else if (name === 'LanternPaper') {
 			// The kumiko lantern's washi paper, lit from inside.
-			object.material = new THREE.MeshBasicMaterial({
-				color: new THREE.Color('#ffa24a').multiplyScalar(1.15)
-			});
-		} else if (object.name === 'WatchLCD') {
-			object.material = watchMaterial;
+			object.material = new THREE.MeshBasicMaterial({ color: LANTERN_PAPER.clone() });
+			paperMaterials.push(object.material);
+		} else if (object.name === 'ClockDisplay') {
+			object.material = clockMaterial;
+		} else if (object.name === 'ClockDigits') {
+			// Only there for Blender previews; the site draws the display itself.
+			object.visible = false;
 		}
+		if (object.material instanceof THREE.MeshStandardMaterial) live.push(object.material);
 	});
 	screen.material = screenMaterial;
 	screen.geometry.computeBoundingBox();
@@ -208,30 +227,22 @@ export async function createIntro(options: IntroOptions): Promise<IntroEngine> {
 	contact.position.set(rest.x, rest.y - 0.145, rest.z);
 	scene.add(contact);
 
-	// Capture the baked room from where the console floats. This lights the console (reflections
-	// and ambient light), so it sits in the same light as the room. Only the visible corner of the
-	// room is modelled, so the rest of it (the sunlit walls and ceiling behind the camera) stands in
-	// as the background while capturing.
+	// Things that move (the console, the cube) are lit live, from a capture of the baked room. Only
+	// the visible corner of the room is modelled, so a warm colour stands in for the rest of it.
 	sp.visible = false;
 	const pmrem = new THREE.PMREMGenerator(renderer);
 	scene.background = new THREE.Color(0.46, 0.36, 0.3);
 	const envMap = pmrem.fromScene(scene, 0.02, 0.05, 100, { position: FLOAT }).texture;
-	scene.background = new THREE.Color('#1a1830');
+	scene.background = new THREE.Color('#120f0c');
 	pmrem.dispose();
 	sp.visible = true;
-	const lit: THREE.MeshStandardMaterial[] = [...reflective];
-	sp.traverse((object) => {
-		if (object instanceof THREE.Mesh && object.material instanceof THREE.MeshStandardMaterial) {
-			lit.push(object.material);
-		}
-	});
-	for (const material of lit) {
+	for (const material of live) {
 		material.envMap = envMap;
 		// Matched by eye to the baked props beside it.
 		material.envMapIntensity = 2.6;
 	}
 
-	// Dust drifting in the sunlight.
+	// Dust drifting in the light.
 	const moteCount = 140;
 	const motePositions = new Float32Array(moteCount * 3);
 	for (let i = 0; i < moteCount; i++) {
@@ -243,7 +254,7 @@ export async function createIntro(options: IntroOptions): Promise<IntroEngine> {
 	moteGeometry.setAttribute('position', new THREE.BufferAttribute(motePositions, 3));
 	const moteMaterial = new THREE.PointsMaterial({
 		color: '#ffe9c8',
-		size: 0.035,
+		size: 0.03,
 		map: softDot('255,255,255'),
 		transparent: true,
 		opacity: 0,
@@ -264,8 +275,12 @@ export async function createIntro(options: IntroOptions): Promise<IntroEngine> {
 	onProgress(0.9);
 	await document.fonts.ready;
 	await renderer.compileAsync(scene, camera);
-	renderer.setAnimationLoop(render);
+
+	const raycaster = new THREE.Raycaster();
 	addEventListener('resize', resize);
+	canvas.addEventListener('pointermove', pointermove);
+	canvas.addEventListener('pointerleave', pointerleave);
+	canvas.addEventListener('click', click);
 	onProgress(1);
 
 	function softDot(rgb: string) {
@@ -282,8 +297,8 @@ export async function createIntro(options: IntroOptions): Promise<IntroEngine> {
 
 	function pose(t: number) {
 		sp.position.lerpVectors(rest, FLOAT, s.rise);
-		sp.position.y += s.bob * 0.05 * Math.sin(t * 2.2) - s.dip * 0.05;
-		sp.rotation.set(s.pitch * PITCH, s.spin * (Math.PI * 2 + yaw), 0);
+		sp.position.y += s.bob * 0.05 * Math.sin(t * 2.2) - s.dip * 0.05 + hover.sp * 0.06;
+		sp.rotation.set(s.pitch * PITCH, s.spin * (Math.PI * 2 + yaw), hover.sp * 0.04);
 		lid.rotation.x = -s.open * OPEN;
 		cart.position.copy(cartRest);
 		cart.position.z += s.cartOut * 0.45;
@@ -293,6 +308,8 @@ export async function createIntro(options: IntroOptions): Promise<IntroEngine> {
 	// Where the camera must sit for the screen to exactly fill the viewport.
 	function computeFinalCamera() {
 		const saved = { ...s };
+		const savedHover = hover.sp;
+		hover.sp = 0;
 		Object.assign(s, { rise: 1, spin: 1, pitch: 1, open: 1, cartOut: 0, bob: 0, dip: 0 });
 		pose(0);
 		sp.updateMatrixWorld(true);
@@ -310,38 +327,52 @@ export async function createIntro(options: IntroOptions): Promise<IntroEngine> {
 		finalQuat.setFromRotationMatrix(new THREE.Matrix4().lookAt(finalPos, center, up));
 
 		Object.assign(s, saved);
+		hover.sp = savedHover;
 	}
 
-	function powerOn() {
-		ledMaterial?.emissive.set('#3dff6a');
-		if (ledMaterial) ledMaterial.emissiveIntensity = 2;
-		screenMaterial.color.set('#ffffff');
-		screenMaterial.map = screenTexture;
+	function power(on: boolean) {
+		ledMaterial?.emissive.set(on ? '#3dff6a' : '#000000');
+		if (ledMaterial) ledMaterial.emissiveIntensity = on ? 2 : 0;
+		screenMaterial.color.set(on ? '#ffffff' : '#1d201d');
+		screenMaterial.map = on ? screenTexture : null;
 		screenMaterial.needsUpdate = true;
+	}
+
+	function setLantern(level: number) {
+		lampTint.value.setScalar(level);
+		for (const material of paperMaterials) {
+			material.color.copy(LANTERN_PAPER).multiplyScalar(0.25 + 0.75 * level);
+		}
 	}
 
 	function render(time: number) {
 		const t = time / 1000;
+		swayTime.value = t;
 		pose(t);
 
 		contact.material.opacity = 0.75 * (1 - Math.min(1, s.rise * 1.6));
-		moteMaterial.opacity = s.rise * 0.8 * (1 - s.dive);
+		moteMaterial.opacity = (0.35 + 0.45 * s.rise) * (1 - s.dive);
 		motes.rotation.y = t * 0.03;
 		motes.position.y = Math.sin(t * 0.4) * 0.08;
 
+		// In the room the camera drifts gently with the pointer.
+		const calm = (1 - s.drift) * (1 - s.dive);
+		parallax.lerp(pointer, 0.05);
 		if (s.dive > 0) {
 			camera.position.lerpVectors(CAMERA_NEAR, finalPos, s.dive);
 			camera.quaternion.slerpQuaternions(nearQuat, finalQuat, s.dive);
 		} else {
 			camera.position.lerpVectors(view.eye, CAMERA_NEAR, s.drift);
+			camera.position.x += parallax.x * 0.35 * calm;
+			camera.position.y += parallax.y * 0.2 * calm;
 			camera.lookAt(new THREE.Vector3().lerpVectors(view.target, FLOAT, s.drift));
 		}
 
-		const now = new Date();
-		if (now.getSeconds() !== watchSecond) {
-			watchSecond = now.getSeconds();
-			drawWatchLCD(watchCtx, now);
-			watchTexture.needsUpdate = true;
+		const tick = Math.floor(Date.now() / 500);
+		if (tick !== clockTick) {
+			clockTick = tick;
+			drawClockLED(clockCtx, new Date());
+			clockTexture.needsUpdate = true;
 		}
 
 		if (s.boot >= 0) {
@@ -359,8 +390,76 @@ export async function createIntro(options: IntroOptions): Promise<IntroEngine> {
 		computeFinalCamera();
 	}
 
+	function thingAt(event: PointerEvent | MouseEvent): Thing | null {
+		const rect = canvas.getBoundingClientRect();
+		const ndc = new THREE.Vector2(
+			((event.clientX - rect.left) / rect.width) * 2 - 1,
+			-((event.clientY - rect.top) / rect.height) * 2 + 1
+		);
+		raycaster.setFromCamera(ndc, camera);
+		for (const hit of raycaster.intersectObject(gltf.scene, true)) {
+			for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) {
+				if (o === sp) return 'sp';
+				if (/^Cube/.test(o.name)) return 'cube';
+				if (/^Clock/.test(o.name)) return 'clock';
+				if (/^(Kumiko|LanternPaper)/.test(o.name)) return 'lantern';
+				if (/^Bonsai/.test(o.name)) return 'bonsai';
+			}
+			// The first thing hit blocks anything behind it.
+			return null;
+		}
+		return null;
+	}
+
+	function pointermove(event: PointerEvent) {
+		const rect = canvas.getBoundingClientRect();
+		pointer.set(
+			((event.clientX - rect.left) / rect.width) * 2 - 1,
+			-((event.clientY - rect.top) / rect.height) * 2 + 1
+		);
+		if (mode !== 'room') return;
+		const thing = event.pointerType === 'mouse' ? thingAt(event) : null;
+		setHovered(thing, event);
+	}
+
+	function pointerleave() {
+		pointer.set(0, 0);
+		setHovered(null);
+	}
+
+	function setHovered(thing: Thing | null, event?: PointerEvent | MouseEvent) {
+		if (thing !== hovered) {
+			hovered = thing;
+			gsap.to(hover, { sp: thing === 'sp' ? 1 : 0, duration: 0.45, ease: 'back.out(2)' });
+			canvas.style.cursor = thing ? 'pointer' : '';
+		}
+		onHover(thing && event ? { label: LABELS[thing], x: event.clientX, y: event.clientY } : null);
+	}
+
+	function click(event: MouseEvent) {
+		if (mode !== 'room') return;
+		const thing = thingAt(event);
+		if (thing === 'sp') return enterSite();
+		if (thing === 'lantern') {
+			gsap.to(lantern, {
+				level: lantern.level > 0.5 ? 0 : 1,
+				duration: 0.6,
+				ease: 'power2.out',
+				onUpdate: () => setLantern(lantern.level)
+			});
+		}
+		// Touch has no hover, so a tap shows the label instead.
+		if (thing) onHover({ label: LABELS[thing], x: event.clientX, y: event.clientY });
+	}
+
+	// The tweens record their start values when the timeline is built, so it's always built from the
+	// resting pose (the SP closed on the table).
+	const RESTING = { ...s };
+
 	function timelineFor() {
-		const tl = gsap.timeline({ paused: true, onComplete: finish });
+		Object.assign(s, RESTING);
+		const tl = gsap.timeline({ paused: true });
+		const forwards = () => !tl.reversed();
 		tl.to(s, { drift: 1, duration: 2.8, ease: 'power1.inOut' }, 0)
 			.to(s, { rise: 1, duration: 1.3, ease: 'back.out(1.6)' }, 0.3)
 			.to(s, { spin: 1, duration: 1.5, ease: 'power2.inOut' }, 0.3)
@@ -369,33 +468,73 @@ export async function createIntro(options: IntroOptions): Promise<IntroEngine> {
 			.to(s, { cartOut: 1, duration: 0.5, ease: 'back.out(2)' }, 0.9)
 			.to(s, { bob: 1, duration: 0.6 }, 1.4)
 			.to(s, { cartOut: 0, duration: 0.35, ease: 'power3.in' }, 2.4)
-			.call(() => sound.click(), [], 2.75)
+			.call(() => forwards() && sound.click(), [], 2.75)
 			.to(s, { dip: 1, duration: 0.08, yoyo: true, repeat: 1 }, 2.75)
-			.call(powerOn, [], 2.8)
+			.call(() => power(forwards()), [], 2.8)
 			.fromTo(s, { boot: 0 }, { boot: BOOT_DURATION, duration: BOOT_DURATION, ease: 'none' }, 2.8)
-			.call(() => sound.chime(), [], 2.8)
+			.call(() => forwards() && sound.chime(), [], 2.8)
 			.to(s, { bob: 0, duration: 1.4 }, 3.3)
 			// A slow push while the logo plays, then one glide into the screen that slows to a stop
 			// as the screen fills, so there's no jolt when the page takes over.
 			.to(s, { dive: 0.25, duration: BOOT_DURATION - 0.9, ease: 'sine.inOut' }, 2.8)
 			.to(s, { dive: 1, duration: 1.1, ease: 'power2.inOut' }, 2.8 + BOOT_DURATION - 0.9)
-			// Once the screen fills the view, the whole layer fades (not just the canvas), so nothing
-			// dark shows between the screen and the page.
+			// Once the screen fills the view, the whole layer fades, so nothing dark shows between the
+			// screen and the page.
 			.to(layer, { opacity: 0, duration: 0.35 }, 2.8 + BOOT_DURATION + 0.1);
 		return tl;
 	}
 
-	function finish() {
-		timeline?.kill();
-		dispose();
-		onDone();
+	function setMode(next: RoomMode) {
+		mode = next;
+		if (next === 'site') renderer.setAnimationLoop(null);
+		else renderer.setAnimationLoop(render);
+		if (import.meta.env.DEV) Object.assign(window, { __boot: { s, timeline, scene, mode } });
+		onMode(next);
 	}
 
-	// Frees the GPU as soon as the page takes over; nothing 3D runs while the HTML is showing.
+	async function enterSite() {
+		if (mode !== 'room') return;
+		setHovered(null);
+		await sound.resume();
+		timeline?.kill();
+		timeline = timelineFor();
+		timeline.eventCallback('onComplete', () => setMode('site'));
+		setMode('booting');
+		timeline.play();
+	}
+
+	function skipToSite() {
+		if (mode === 'site') return;
+		timeline?.kill();
+		timeline = timelineFor();
+		timeline.progress(1, true);
+		power(true);
+		setMode('site');
+	}
+
+	async function returnToRoom() {
+		if (mode !== 'site') return;
+		await sound.resume();
+		timeline?.kill();
+		// Start from the end (the screen filling the view, the page on top) and play backwards. The
+		// layer's fade must record "visible" as where it started, so reversing it fades the room in.
+		layer.style.opacity = '1';
+		timeline = timelineFor();
+		timeline.progress(1, true);
+		power(true);
+		timeline.eventCallback('onReverseComplete', () => setMode('room'));
+		setMode('returning');
+		timeline.reverse();
+	}
+
 	function dispose() {
 		if (disposed) return;
 		disposed = true;
+		timeline?.kill();
 		removeEventListener('resize', resize);
+		canvas.removeEventListener('pointermove', pointermove);
+		canvas.removeEventListener('pointerleave', pointerleave);
+		canvas.removeEventListener('click', click);
 		renderer.setAnimationLoop(null);
 		scene.traverse((object) => {
 			if (object instanceof THREE.Mesh || object instanceof THREE.Points) {
@@ -409,21 +548,17 @@ export async function createIntro(options: IntroOptions): Promise<IntroEngine> {
 		});
 		envMap.dispose();
 		screenTexture.dispose();
-		watchTexture.dispose();
+		clockTexture.dispose();
 		renderer.dispose();
 		renderer.forceContextLoss();
 		setTimeout(() => sound.close(), 4000);
 	}
 
+	setMode(mode);
 	return {
-		start: async () => {
-			await sound.resume();
-			timeline = timelineFor();
-			// Lets screenshot scripts seek to exact moments during development.
-			if (import.meta.env.DEV) Object.assign(window, { __boot: { s, timeline, scene } });
-			timeline.play();
-		},
-		skip: finish,
+		enterSite,
+		skipToSite,
+		returnToRoom,
 		setMuted: (muted) => sound.setMuted(muted),
 		dispose
 	};

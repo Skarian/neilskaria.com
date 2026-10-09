@@ -6,7 +6,7 @@ import model from './assets/bedroom.glb?url';
 import chime from './assets/gba-boot.mp3?url';
 import scales from './assets/lightmaps.json';
 
-const lightmapFiles = import.meta.glob('./assets/*-day.webp', {
+const lightmapFiles = import.meta.glob('./assets/*-{day,lamp}.webp', {
 	query: '?url',
 	import: 'default',
 	eager: true

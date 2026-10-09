@@ -1,6 +1,7 @@
 <script lang="ts">
 	import BootIntro from '#lib/boot/BootIntro.svelte';
 	import ScreenFrame from '#lib/boot/ScreenFrame.svelte';
+	import { room } from '#lib/boot/room.svelte.js';
 
 	// Placeholder "inside the screen" site so the intro has somewhere to land.
 	const PAPER = '#f6f1e7';
@@ -56,12 +57,12 @@
 			</section>
 
 			<footer class="text-xs tracking-widest text-[#8c8fa1]">
-				<button
-					class="cursor-pointer hover:text-[#4c4f69]"
-					onclick={() => dispatchEvent(new Event('intro:replay'))}
-				>
-					↺ REPLAY INTRO
-				</button>
+				<!-- Only offered once the room has loaded in the background, so going back is instant. -->
+				{#if room.ready}
+					<button class="cursor-pointer hover:text-[#4c4f69]" onclick={room.open}>
+						↺ BACK TO THE ROOM
+					</button>
+				{/if}
 			</footer>
 		</main>
 	</div>

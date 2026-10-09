@@ -11,7 +11,6 @@ import urllib.request
 from pathlib import Path
 
 MODELS = [
-	'ClassicNightstand_01',
 	'potted_plant_02',
 ]
 TEXTURES = [
@@ -20,6 +19,8 @@ TEXTURES = [
 	'waffle_pique_cotton',
 	'rough_linen',
 	'velour_velvet',
+	'oak_veneer_01',
+	'american_walnut_veneer',
 	'curly_teddy_natural',
 ]
 TEXTURE_MAPS = {'Diffuse': 'diff', 'nor_gl': 'nor', 'Rough': 'rough'}

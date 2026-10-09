@@ -45,7 +45,9 @@ LOOKS = {
 }
 LOOK = LOOKS[os.environ.get('LOOK', 'alita')]
 # Lighting states to bake. 'day' is the base; 'lamp' (the bedside lamp alone) is optional.
-STATES = ('day',)
+# 'day' is the sun and sky; 'lamp' is the lantern alone, baked separately so the site can tint and
+# dim it live.
+STATES = ('day', 'lamp')
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
 scene = bpy.context.scene
@@ -300,18 +302,22 @@ white_paint = material('WhitePaint', (0.86, 0.85, 0.84), roughness=0.5)
 brass = material('Brass', (0.8, 0.6, 0.35), roughness=0.3, metallic=1.0)
 
 # Furniture and props on the nightstand.
-add('props', place(import_model('ClassicNightstand_01'), (0, 0.3, FLOOR)))
-# The personal things on the table: a Casio watch, a Rubik's cube, the JOSEPH tumbler and a bonsai.
 import props  # noqa: E402
 
-props_baked, foliage, props_unbaked = props.build(lambda obj, size: bake_albedo(obj, size, OUT_DIR), TOP)
+# A mid-century oak nightstand; its top is the stage for everything else.
+oak = textured('Oak', 'oak_veneer_01', tint=(0.6, 0.4, 0.22))
+woodgrain = textured('ClockWoodgrain', 'american_walnut_veneer', tint=(0.2, 0.11, 0.06))
+nightstand = add('props', place(props.mcm_nightstand(oak), (0, 0.3, FLOOR)))
+# The personal things on the table: a clock radio, a Rubik's cube, the JOSEPH tumbler and a bonsai.
+
+props_baked, foliage, props_unbaked = props.build(lambda obj, size: bake_albedo(obj, size, OUT_DIR), TOP, woodgrain)
 for obj in props_baked:
 	add('props', obj)
 for obj in foliage:
 	add('foliage', obj)
 
 # A kumiko lantern stands where a lamp would; its bulb is the warm light in the bake.
-lamp_x, lamp_y = 1.45, 1.05
+lamp_x, lamp_y = 0.8, 1.15
 lantern_parts, lantern_paper, lantern_light = props.kumiko_lantern()
 for obj in lantern_parts + [lantern_paper]:
 	obj.location = Vector((lamp_x, lamp_y, TOP)) + obj.location
@@ -320,72 +326,115 @@ for obj in lantern_parts:
 
 add('room', place(import_model('potted_plant_02'), (6.6, 0.2, FLOOR), rot_z=0.4))
 
-# Bed: upholstered frame and headboard, mattress, pillows and a draped duvet.
+# Bed: a mid-century oak frame on splayed legs, a white mattress, a navy quilted comforter with the
+# top sheet turned down over it, and plump pillows against an oak headboard.
 BED_L, BED_R = -18.6, -3.4
 BED_CX = (BED_L + BED_R) / 2
 BED_W = BED_R - BED_L
 HEAD_Y = 2.1
 FOOT_Y = HEAD_Y - 20.0
-MATTRESS_TOP = FLOOR + 6.4
+MATTRESS_TOP = FLOOR + 6.6
 
-velvet = textured('Velvet', 'velour_velvet', tint=(0.17, 0.17, 0.18))
-linen = textured('Sheet', 'rough_linen', tint=(0.96, 0.95, 0.97))
-pillowcase = textured('Pillowcase', 'rough_linen', tint=(1.0, 0.98, 0.98))
-duvet_mat = textured('Duvet', 'waffle_pique_cotton', tint=LOOK['comforter'])
-oak = material('BedLegs', (0.3, 0.19, 0.11), roughness=0.5)
+linen = textured('Sheet', 'rough_linen', tint=(0.95, 0.94, 0.92))
+pillowcase = textured('Pillowcase', 'rough_linen', tint=(0.97, 0.96, 0.94))
+duvet_mat = textured('Duvet', 'cotton_jersey' if (CACHE / 'textures' / 'cotton_jersey').exists() else 'waffle_pique_cotton', tint=LOOK['comforter'])
+accent = textured('Cushion', 'velour_velvet', tint=(0.62, 0.3, 0.14))
 
-bed_base = add('bed', box('BedBase', (BED_W, HEAD_Y - FOOT_Y, 3.0), (BED_CX, (HEAD_Y + FOOT_Y) / 2, FLOOR + 2.5), velvet, bevel=0.3, segments=4))
-mattress = add('bed', box('Mattress', (BED_W - 0.3, HEAD_Y - FOOT_Y - 0.3, 2.4), (BED_CX, (HEAD_Y + FOOT_Y) / 2, MATTRESS_TOP - 1.2), linen, bevel=0.45, segments=5))
-add('bed', box('Headboard', (BED_W + 0.6, 0.8, 11.5), (BED_CX, HEAD_Y + 0.4, FLOOR + 6.75), velvet, bevel=0.4, segments=6))
-for i, (x, y) in enumerate([(BED_L + 0.6, FOOT_Y + 0.6), (BED_R - 0.6, FOOT_Y + 0.6)]):
-	add('room', cylinder(f'BedLeg{i}', 0.35, 1.0, (x, y, FLOOR + 0.5), oak))
+rails = add('bed', box('BedFrame', (BED_W + 0.5, HEAD_Y - FOOT_Y + 0.3, 1.8), (BED_CX, (HEAD_Y + FOOT_Y) / 2, FLOOR + 3.9), oak, bevel=0.18, segments=4))
+mattress = add('bed', box('Mattress', (BED_W - 0.1, HEAD_Y - FOOT_Y - 0.2, 2.4), (BED_CX, (HEAD_Y + FOOT_Y) / 2, MATTRESS_TOP - 1.2), linen, bevel=0.6, segments=6))
+headboard = box('Headboard', (BED_W + 0.5, 0.45, 6.6), (BED_CX, HEAD_Y + 0.45, FLOOR + 6.8), oak, bevel=0.2, segments=4)
+headboard.rotation_euler = (math.radians(-7), 0, 0)
+add('bed', headboard)
+for i, (x, y) in enumerate([(BED_L + 1.0, FOOT_Y + 1.0), (BED_R - 1.0, FOOT_Y + 1.0), (BED_L + 1.0, HEAD_Y - 1.0), (BED_R - 1.0, HEAD_Y - 1.0)]):
+	sx, sy = (1 if x > BED_CX else -1), (1 if y > (HEAD_Y + FOOT_Y) / 2 else -1)
+	add('room', props.tapered_leg(f'BedLeg{i}', (x, y, FLOOR + 3.1), (x + sx * 0.25, y + sy * 0.25, FLOOR), 0.3, 0.17, oak))
 
-for i, x in enumerate([BED_CX - 3.7, BED_CX + 3.7]):
-	pillow = box(f'Pillow{i}', (6.6, 3.6, 1.4), (x, 0.0, MATTRESS_TOP + 0.6), pillowcase, segments=0)
-	sub = pillow.modifiers.new('round', 'SUBSURF')
-	sub.levels = 3
+
+def bend(d, radius):
+	"""How far a cloth runs outwards and drops after travelling d past a mattress edge: it rolls over
+	a rounded edge of the given radius, then hangs straight down."""
+	if d <= 0:
+		return 0.0, 0.0
+	arc = math.pi / 2 * radius
+	if d < arc:
+		return radius * math.sin(d / radius), radius * (1 - math.cos(d / radius))
+	return radius, radius + d - arc
+
+
+def drape(name, x0, x1, y0, y1, top, mat, res=(80, 80), radius=0.9, folds=0.12):
+	"""A cloth lying over the mattress (whose edges are BED_L/BED_R and FOOT_Y), shaped directly:
+	flat on top, rolling over the edges, hanging down the sides and foot in soft folds."""
+	bpy.ops.mesh.primitive_grid_add(x_subdivisions=res[0], y_subdivisions=res[1], size=1, location=((x0 + x1) / 2, (y0 + y1) / 2, top))
+	cloth = bpy.context.active_object
+	cloth.scale = (x1 - x0, y1 - y0, 1)
+	bpy.ops.object.transform_apply(scale=True)
+	half = BED_W / 2 - 0.05
+	for v in cloth.data.vertices:
+		x, y = v.co.x, v.co.y
+		side = 1 if x > BED_CX else -1
+		ox, dz_side = bend(abs(x - BED_CX) - half, radius)
+		oy, dz_foot = bend((FOOT_Y + 0.1) - y, radius)
+		if ox:
+			x = BED_CX + side * (half + ox)
+		if oy:
+			y = FOOT_Y + 0.1 - oy
+		drop = max(dz_side, dz_foot)
+		hang = max(0.0, drop - radius)
+		# Folds deepen as the cloth hangs.
+		wave = folds * hang * math.sin(v.co.y * 1.9 + v.co.x * 0.7)
+		if ox:
+			x += side * wave
+		if oy:
+			y -= folds * hang * math.sin(v.co.x * 1.7)
+		v.co = Vector((x, y, top - drop + random.uniform(-0.015, 0.015)))
+	cloth.data.update()
+	return finish(cloth, name, mat)
+
+
+# The comforter covers the bed up to below the pillows and hangs over the sides and foot.
+COMFORTER_TOP = HEAD_Y - 6.0
+comforter = drape('Duvet', BED_L - 3.6, BED_R + 3.6, FOOT_Y - 3.4, COMFORTER_TOP, MATTRESS_TOP + 0.1, duvet_mat)
+# Quilting: soft puffs between stitch lines, pushed out along the surface.
+mesh = comforter.data
+QUILT = 3.0
+for v in mesh.vertices:
+	u, w = (v.co.x - BED_CX) / QUILT, v.co.y / QUILT
+	puff = abs(math.sin(math.pi * u) * math.sin(math.pi * w)) ** 0.8
+	v.co += v.normal * (0.06 + 0.42 * puff)
+for loop in mesh.uv_layers[0].data:
+	loop.uv = (loop.uv.x * (BED_W + 7.2) / 6, loop.uv.y * (COMFORTER_TOP - FOOT_Y + 3.4) / 6)
+thick = comforter.modifiers.new('thickness', 'SOLIDIFY')
+thick.thickness = 0.45
+thick.offset = -1
+comforter.modifiers.new('smooth', 'SUBSURF').levels = 1
+apply_modifiers(comforter)
+add('bed', comforter)
+
+# The top sheet, turned down over the comforter's top edge in a crisp white band.
+band = drape('SheetFold', BED_L - 3.9, BED_R + 3.9, COMFORTER_TOP - 2.7, COMFORTER_TOP + 0.25, MATTRESS_TOP + 0.62, linen, res=(80, 14), radius=1.1, folds=0.06)
+band.modifiers.new('thickness', 'SOLIDIFY').thickness = 0.06
+band.modifiers.new('smooth', 'SUBSURF').levels = 1
+add('bed', band)
+
+# Two plump pillows leaning on the headboard, and a rust cushion in front.
+for i, x in enumerate([BED_CX - 3.6, BED_CX + 3.6]):
+	pillow = box(f'Pillow{i}', (6.8, 4.6, 1.5), (x, HEAD_Y - 1.7, MATTRESS_TOP + 1.9), pillowcase, bevel=0.55, segments=3)
+	bulge = pillow.modifiers.new('bulge', 'CAST')
+	bulge.factor = 0.35
+	bulge.use_z = True
+	bulge.use_x = bulge.use_y = False
+	pillow.modifiers.new('round', 'SUBSURF').levels = 2
 	tex = bpy.data.textures.new(f'PillowNoise{i}', 'CLOUDS')
-	tex.noise_scale = 2.5
+	tex.noise_scale = 2.0
 	disp = pillow.modifiers.new('lumps', 'DISPLACE')
 	disp.texture = tex
-	disp.strength = 0.25
-	pillow.rotation_euler = (math.radians(-8), 0, math.radians(3 - 6 * i))
+	disp.strength = 0.22
+	pillow.rotation_euler = (math.radians(58), 0, math.radians(2 - 4 * i))
 	add('bed', pillow)
-
-# The duvet is a cloth simulation dropped over the mattress.
-DUVET = (BED_W + 5.0, 15.5)
-bpy.ops.mesh.primitive_grid_add(x_subdivisions=90, y_subdivisions=70, size=1, location=(BED_CX, FOOT_Y + DUVET[1] / 2 - 1.6, MATTRESS_TOP + 0.6))
-duvet = bpy.context.active_object
-duvet.scale = (DUVET[0], DUVET[1], 1)
-bpy.ops.object.transform_apply(scale=True)
-for v in duvet.data.vertices:
-	v.co.z += random.uniform(-0.06, 0.06)
-finish(duvet, 'Duvet', duvet_mat)
-for collider in (mattress, bed_base):
-	collider.modifiers.new('collision', 'COLLISION')
-	collider.collision.thickness_outer = 0.06
-cloth = duvet.modifiers.new('cloth', 'CLOTH')
-cloth.settings.quality = 8
-cloth.settings.mass = 0.4
-cloth.settings.tension_stiffness = 20
-cloth.settings.compression_stiffness = 20
-cloth.settings.bending_stiffness = 2
-cloth.settings.air_damping = 2
-cloth.collision_settings.distance_min = 0.06
-cloth.point_cache.frame_end = 60
-for frame in range(1, 61):
-	scene.frame_set(frame)
-apply_modifiers(duvet)
-for collider in (mattress, bed_base):
-	collider.modifiers.remove(collider.modifiers['collision'])
-uv = duvet.data.uv_layers[0].data
-for loop in uv:
-	loop.uv = (loop.uv.x * DUVET[0] / 6, loop.uv.y * DUVET[1] / 6)
-thick = duvet.modifiers.new('thickness', 'SOLIDIFY')
-thick.thickness = 0.25
-thick.offset = 1
-duvet.modifiers.new('smooth', 'SUBSURF').levels = 1
-add('bed', duvet)
+cushion = box('Cushion', (4.6, 3.2, 1.1), (BED_CX + 1.2, HEAD_Y - 3.6, MATTRESS_TOP + 1.3), accent, bevel=0.4, segments=3)
+cushion.modifiers.new('round', 'SUBSURF').levels = 2
+cushion.rotation_euler = (math.radians(66), 0, math.radians(-8))
+add('bed', cushion)
 
 # Rug, floor, skirting and walls. The window above the bed lets moonlight in.
 rug = add('room', box('Rug', (16, 10, 0.12), (BED_CX + 5, FOOT_Y + 6.5, FLOOR + 0.06), textured('Rug', 'curly_teddy_natural', tint=(0.98, 0.92, 0.94)), bevel=0.05, segments=2))
@@ -470,7 +519,7 @@ bake_only += [
 ]
 
 # Tiling textures get world-space UVs (size = units per texture repeat).
-for obj, size in [(floor, 16), (rug, 8), (bed_base, 6), (mattress, 6)] + [(o, 6) for o in groups['bed'] if o.name == 'Headboard'] + [(o, 18) for o in groups['room'] if o.name.startswith(('Wall', 'SideWall'))]:
+for obj, size in [(floor, 16), (rug, 8), (rails, 8), (mattress, 6), (nightstand, 6)] + [(o, 8) for o in groups['bed'] if o.name == 'Headboard'] + [(o, 6) for o in groups['room'] if o.name.startswith('BedLeg')] + [(o, 18) for o in groups['room'] if o.name.startswith(('Wall', 'SideWall'))]:
 	apply_modifiers(obj)
 	uv_box(obj, size)
 for obj in groups['props'] + groups['bed'] + groups['room'] + bake_only:
@@ -620,6 +669,9 @@ for mat in bpy.data.materials:
 def set_state(state):
 	scene.cycles.sample_clamp_indirect = 2.0
 	sun.hide_render = fill.hide_render = state == 'lamp'
+	lamp.hide_render = state == 'day'
+	paper = bpy.data.materials['LanternPaper'].node_tree.nodes['Principled BSDF']
+	paper.inputs['Emission Strength'].default_value = 5.0 if state == 'lamp' else 0.0
 	background.inputs['Strength'].default_value = 0.0 if state == 'lamp' else 1.0
 	sky_mat.node_tree.nodes['Principled BSDF'].inputs['Emission Strength'].default_value = 0.0 if state == 'lamp' else 6.0
 
@@ -645,11 +697,14 @@ if PREVIEW:
 	scene.view_settings.exposure = LOOK['exposure']
 	scene.view_settings.look = LOOK['look']
 	look_name = os.environ.get('LOOK', 'alita')
-	for name, eye, target in [('start', (4.2, -14, 3.2), (-1.8, 0, -0.6)), ('near', (0.9, -6, 1.9), (0, -0.9, 1.45))]:
+	views = [('start', (4.2, -14, 3.2), (-1.8, 0, -0.6)), ('near', (0.9, -6, 1.9), (0, -0.9, 1.45)), ('bed', (4.0, -27, 9.5), (-8.5, -6, -2.5)), ('table', (0.4, -5.2, 1.6), (0.0, 0.5, 0.4))]
+	for name, eye, target in views:
 		cam.location = eye
 		cam.rotation_euler = (Vector(target) - Vector(eye)).to_track_quat('-Z', 'Y').to_euler()
-		for state in STATES:
+		for state in ('both',):
 			set_state(state)
+			lamp.hide_render = False
+			bpy.data.materials['LanternPaper'].node_tree.nodes['Principled BSDF'].inputs['Emission Strength'].default_value = 5.0
 			scene.render.filepath = str(OUT_DIR / f'preview-{look_name}-{name}.png')
 			bpy.ops.render.render(write_still=True)
 	sys.exit(0)
