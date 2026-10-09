@@ -9,6 +9,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { introAssets, lightmapScales } from './assets';
 import { bakedMaterial, loadBakedLighting, swayTime, type BakedLighting } from './baked-material';
+import { createBonsai } from './bonsai';
 import { BOOT_DURATION, drawBootScreen } from './boot-screen';
 import { drawClockLED, drawFrequencyLED } from './clock-led';
 import { FM_MIN } from '#lib/radio/radio.js';
@@ -26,6 +27,9 @@ import { createBootSound } from './sound';
 
 export type RoomMode = 'room' | 'booting' | 'site' | 'returning';
 export type Thing = 'sp' | 'cube' | 'clock' | 'lantern' | 'bonsai';
+
+// The bonsai, as the panel shows it: its tufts' average length (0.3 trimmed, 1 neat, 1.6 shaggy).
+export type BonsaiState = { shagginess: number };
 
 // The Rubik's cube game, as the panel shows it.
 export type CubeState = {
@@ -51,6 +55,7 @@ export type RoomOptions = {
 	// An object's mini-game has opened (or closed, with null).
 	onFocus: (thing: Thing | null) => void;
 	onCube: (state: CubeState) => void;
+	onBonsai: (state: BonsaiState) => void;
 	// The boot chime is about to play (true), or the boot is over: music can dip under it.
 	onChime: (playing: boolean) => void;
 };
@@ -64,6 +69,8 @@ export type Room = {
 	setLantern: (color: string, level: number) => void;
 	scrambleCube: () => void;
 	solveCube: () => void;
+	waterBonsai: () => void;
+	resetBonsai: () => void;
 	// Shows the site's radio on the clock radio: its power switch, dial and display.
 	setRadio: (state: { on: boolean; freq: number }) => void;
 	setMuted: (muted: boolean) => void;
@@ -111,7 +118,8 @@ export function startView(aspect: number) {
 }
 
 export async function createRoom(options: RoomOptions): Promise<Room> {
-	const { canvas, layer, background, onProgress, onMode, onFocus, onCube, onChime } = options;
+	const { canvas, layer, background, onProgress, onMode, onFocus, onCube, onBonsai, onChime } =
+		options;
 
 	const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 	renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -178,6 +186,16 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	// The cube: lifted off the table to play with, and a happy hop and spin when it's solved.
 	const cubeLift = { value: 0 };
 	const cubeJoy = { value: 0 };
+	// The bonsai: where the scissors are while trimming, where a drag to look around started, how far
+	// the camera has swung round the tree, and how long the watering has left to run.
+	let shears: { x: number; y: number } | null = null;
+	let lookAround: { x: number; y: number } | null = null;
+	const treeOrbit = { yaw: 0, pitch: 0 };
+	let watering = 0;
+	let bonsaiDirty = false;
+	let snippedAt = 0;
+	let bonsaiEmittedAt = 0;
+	let lastFrame = 0;
 	const focusView = { eye: new THREE.Vector3(), target: new THREE.Vector3() };
 	let focused: Thing | null = null;
 	let screenOff = false;
@@ -343,6 +361,46 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	// Picked up to play with: lifted towards the camera, so it hides its own (baked) shadow on the table.
 	const CUBE_FROM = new THREE.Vector3(0.15, 0.55, 1).normalize();
 	const CUBE_LIFT = CUBE_FROM.clone().multiplyScalar(cubeSize * 2.4);
+
+	// The bonsai's foliage, as tufts that can be trimmed and that grow back while the visitor's away.
+	const needleMeshes: THREE.Mesh[] = [];
+	gltf.scene.traverse((o) => {
+		if (o instanceof THREE.Mesh && /^BonsaiNeedle/.test(o.name)) needleMeshes.push(o);
+	});
+	const bonsai = createBonsai(needleMeshes);
+	bonsai.load();
+	// Snipped bits of foliage fall onto the slate and shrink away; water drops fall through the tree.
+	const slate = gltf.scene.getObjectByName('BonsaiSlate');
+	const slateTop = slate ? new THREE.Box3().setFromObject(slate).max.y : 0;
+	const canopy = new THREE.Box3();
+	for (let id = 0; id < bonsai.count; id++)
+		canopy.expandByPoint(new THREE.Vector3().fromArray(bonsai.centres, id * 3));
+	const BITS = 160;
+	const bits = new THREE.InstancedMesh(
+		new THREE.PlaneGeometry(0.014, 0.05),
+		new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+		BITS
+	);
+	bits.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+	bits.frustumCulled = false;
+	const bitState = Array.from({ length: BITS }, () => ({
+		life: 0,
+		drop: false,
+		at: new THREE.Vector3(),
+		velocity: new THREE.Vector3(),
+		turn: new THREE.Euler(),
+		spin: new THREE.Vector3()
+	}));
+	const CLIPPING = new THREE.Color('#4a7536');
+	const DROP = new THREE.Color('#a9d8ff');
+	const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
+	for (let i = 0; i < BITS; i++) {
+		bits.setMatrixAt(i, hidden);
+		bits.setColorAt(i, CLIPPING);
+	}
+	scene.add(bits);
+	// How much each tuft has been trimmed since it last dropped a clipping.
+	const trimmedSince = new Float32Array(bonsai.count);
 
 	// Restore the cube as it was left.
 	let cubeHistory: Move[] = [];
@@ -687,6 +745,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		lantern: new THREE.Vector3(-0.62, 0.22, 0.75),
 		// From a little above, so the top face shows too.
 		cube: CUBE_FROM,
+		// From a little above, so the scissors can reach the tops of the pads.
+		bonsai: new THREE.Vector3(0.15, 0.4, 1),
 		// From the front and a little right, square on to the dial.
 		clock: new THREE.Vector3(0.2, 0.32, 1)
 	};
@@ -712,7 +772,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		const distance =
 			{
 				cube: camera.aspect > 1 ? 2.75 : 2.15,
-				clock: camera.aspect > 1 ? 1.6 : 1.47
+				clock: camera.aspect > 1 ? 1.6 : 1.47,
+				bonsai: camera.aspect > 1 ? 1.45 : 1.12
 			}[thing as string] ?? (camera.aspect > 1 ? 2.1 : 1.85);
 		const eye = centre.clone().addScaledVector(dir, size * distance);
 		// Aim a little right of the object, so it sits left of centre with the panel beside it.
@@ -720,7 +781,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		const aside = thing === 'clock' ? 0.33 : 0.22;
 		const target = centre.clone().addScaledVector(right, size * (camera.aspect > 1 ? aside : 0));
 		// On phones the panel covers the lower half, so the object sits in the space above it.
-		if (camera.aspect <= 1) target.y -= size * (thing === 'clock' ? 0.55 : 0.42);
+		if (camera.aspect <= 1)
+			target.y -= size * (thing === 'clock' ? 0.55 : thing === 'bonsai' ? 0.36 : 0.42);
 		return { eye, target };
 	}
 
@@ -728,7 +790,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		if (mode !== 'room' || focused) return;
 		focused = thing;
 		setHovered(null);
-		focusSway = thing === 'cube' ? 0 : 0.2;
+		focusSway = thing === 'cube' || thing === 'bonsai' ? 0 : 0.2;
+		if (thing === 'bonsai') emitBonsai();
 		if (thing === 'cube') {
 			gsap.to(cubeLift, { value: 1, duration: 1.1, ease: 'power3.inOut', overwrite: true });
 			emitCube();
@@ -743,6 +806,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	function unfocus() {
 		if (!focused) return;
 		if (focused === 'cube') putCubeDown();
+		if (focused === 'bonsai') leaveTree();
 		focused = null;
 		gsap.to(focusBlend, { value: 0, duration: 1.0, ease: 'power3.inOut' });
 		onFocus(null);
@@ -750,8 +814,13 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 
 	function render(time: number) {
 		const t = time / 1000;
+		const dt = Math.min(0.05, lastFrame ? t - lastFrame : 0);
+		lastFrame = t;
 		swayTime.value = t;
 		pose(t);
+		if (shears) trimUnder(shears, dt, t);
+		if (watering > 0) water(dt);
+		moveBits(dt);
 
 		contact.material.opacity = 0.75 * (1 - Math.min(1, s.rise * 1.6));
 		moteMaterial.opacity = (0.35 + 0.45 * s.rise) * (1 - s.dive);
@@ -773,6 +842,14 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			if (f > 0) {
 				camera.position.lerp(focusView.eye, f);
 				look.lerp(focusView.target, f);
+			}
+			// Looking around the bonsai: the camera swings about the tree.
+			if (treeOrbit.yaw || treeOrbit.pitch) {
+				const offset = camera.position.clone().sub(look);
+				offset.applyAxisAngle(Y_AXIS, treeOrbit.yaw * f);
+				const side = new THREE.Vector3().crossVectors(Y_AXIS, offset).normalize();
+				offset.applyAxisAngle(side, -treeOrbit.pitch * f);
+				camera.position.copy(look).add(offset);
 			}
 			camera.lookAt(look);
 		}
@@ -867,6 +944,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			-((event.clientY - rect.top) / rect.height) * 2 + 1
 		);
 		if (focused === 'cube') return dragCube(event);
+		if (focused === 'bonsai') return dragTree(event);
 		if (mode !== 'room' || focused) return;
 		setHovered(event.pointerType === 'mouse' ? thingAt(event) : null);
 	}
@@ -909,7 +987,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		if (mode !== 'room' || focused) return;
 		const thing = thingAt(event);
 		if (thing === 'sp') return enterSite();
-		if (thing === 'lantern' || thing === 'cube' || thing === 'clock') return focus(thing);
+		if (thing) return focus(thing);
 		// Not playable yet: a little hop says so.
 		if (thing)
 			gsap
@@ -971,6 +1049,14 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	}
 
 	function pointerdown(event: PointerEvent) {
+		if (focused === 'bonsai' && mode === 'room') {
+			canvas.setPointerCapture(event.pointerId);
+			const at = { x: event.clientX, y: event.clientY };
+			// Starting near the foliage (not only right on it) trims, so a stroke can begin off its edge.
+			if (tuftsUnder(at, BRUSH * 2).length) shears = at;
+			else lookAround = at;
+			return;
+		}
 		if (focused !== 'cube' || cube.busy || cubeDrag || mode !== 'room') return;
 		canvas.setPointerCapture(event.pointerId);
 		raycaster.setFromCamera(ndcOf(event), camera);
@@ -1054,6 +1140,13 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	}
 
 	async function pointerup() {
+		if (shears || lookAround) {
+			shears = lookAround = null;
+			if (bonsaiDirty) bonsai.save();
+			bonsaiDirty = false;
+			emitBonsai();
+			return;
+		}
 		const drag = cubeDrag;
 		cubeDrag = null;
 		if (drag?.kind !== 'layer') return;
@@ -1155,6 +1248,191 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			mesh.material = radio.on ? materials.on : materials.off;
 	}
 
+	// Trimming the bonsai. The scissors are a circle on screen; the tufts under it at the front of the
+	// foliage (never through to the back of the tree) shorten a little every frame they're under it.
+	const BRUSH = matchMedia('(pointer: coarse)').matches ? 46 : 38;
+	const SCISSORS =
+		"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke-linecap='round'%3E%3Cpath d='M11 21 22 4M21 21 10 4' stroke='%23fffaf0' stroke-width='5'/%3E%3Cpath d='M11 21 22 4M21 21 10 4' stroke='%233a2618' stroke-width='2.5'/%3E%3Ccircle cx='8' cy='24' r='4' fill='%23ff8f5a' stroke='%233a2618' stroke-width='2.5'/%3E%3Ccircle cx='24' cy='24' r='4' fill='%23ff8f5a' stroke='%233a2618' stroke-width='2.5'/%3E%3C/g%3E%3C/svg%3E\") 16 9, crosshair";
+	const tuftAt = new THREE.Vector3();
+
+	function tuftsUnder(at: { x: number; y: number }, brush = BRUSH) {
+		const near: [number, number, number][] = [];
+		let closest = Infinity;
+		const { centres } = bonsai;
+		for (let id = 0; id < bonsai.count; id++) {
+			tuftAt.fromArray(centres, id * 3);
+			const depth = tuftAt.distanceTo(camera.position);
+			tuftAt.project(camera);
+			const dx = ((tuftAt.x + 1) / 2) * innerWidth - at.x;
+			const dy = ((1 - tuftAt.y) / 2) * innerHeight - at.y;
+			const d2 = dx * dx + dy * dy;
+			if (d2 > brush * brush) continue;
+			near.push([id, 1 - Math.sqrt(d2) / brush, depth]);
+			closest = Math.min(closest, depth);
+		}
+		return near
+			.filter(([, , depth]) => depth < closest + 0.1)
+			.map(([id, weight]) => [id, weight]) as [number, number][];
+	}
+
+	function trimUnder(at: { x: number; y: number }, dt: number, t: number) {
+		const cuts = bonsai.trim(tuftsUnder(at), dt);
+		if (!cuts.length) return;
+		bonsaiDirty = true;
+		let total = 0;
+		for (const [id, cut] of cuts) {
+			total += cut;
+			trimmedSince[id] += cut;
+			if (trimmedSince[id] > 0.18) {
+				trimmedSince[id] = 0;
+				dropBit(tuftAt.fromArray(bonsai.centres, id * 3), false);
+			}
+		}
+		// A snip every so often while the scissors are cutting something.
+		if (total > 0.01 && t - snippedAt > 0.13) {
+			snippedAt = t;
+			sound.snip();
+		}
+		if (t - bonsaiEmittedAt > 0.2) {
+			bonsaiEmittedAt = t;
+			emitBonsai();
+		}
+	}
+
+	function dragTree(event: PointerEvent) {
+		if (shears) {
+			shears.x = event.clientX;
+			shears.y = event.clientY;
+			return;
+		}
+		if (lookAround) {
+			treeOrbit.yaw = THREE.MathUtils.clamp(
+				treeOrbit.yaw - (event.clientX - lookAround.x) * 0.005,
+				-0.6,
+				0.6
+			);
+			treeOrbit.pitch = THREE.MathUtils.clamp(
+				treeOrbit.pitch + (event.clientY - lookAround.y) * 0.004,
+				-0.15,
+				0.35
+			);
+			lookAround.x = event.clientX;
+			lookAround.y = event.clientY;
+			return;
+		}
+		if (event.pointerType === 'mouse')
+			canvas.style.cursor = tuftsUnder({ x: event.clientX, y: event.clientY }).length
+				? SCISSORS
+				: 'grab';
+	}
+
+	function dropBit(from: THREE.Vector3, drop: boolean) {
+		const i = bitState.findIndex((b) => b.life <= 0);
+		if (i < 0) return;
+		const bit = bitState[i];
+		bit.life = 1;
+		bit.drop = drop;
+		bit.at.copy(from);
+		if (drop) bit.velocity.set(0, -1.4, 0);
+		else
+			bit.velocity.set(
+				(Math.random() - 0.5) * 0.4,
+				0.2 + Math.random() * 0.3,
+				(Math.random() - 0.2) * 0.4
+			);
+		bit.turn.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
+		bit.spin.set(Math.random() * 8 - 4, Math.random() * 8 - 4, Math.random() * 8 - 4);
+		bits.setColorAt(i, drop ? DROP : CLIPPING);
+		bits.instanceColor!.needsUpdate = true;
+	}
+
+	const bitMatrix = new THREE.Matrix4();
+	const bitTurn = new THREE.Quaternion();
+	const bitScale = new THREE.Vector3();
+	function moveBits(dt: number) {
+		let moved = false;
+		for (let i = 0; i < BITS; i++) {
+			const bit = bitState[i];
+			if (bit.life <= 0) continue;
+			moved = true;
+			if (bit.at.y > slateTop + 0.005) {
+				// Falling, tumbling.
+				bit.velocity.y -= 3 * dt;
+				bit.at.addScaledVector(bit.velocity, dt);
+				bit.turn.x += bit.spin.x * dt;
+				bit.turn.y += bit.spin.y * dt;
+				bit.turn.z += bit.spin.z * dt;
+			} else if (bit.drop) bit.life = 0;
+			else {
+				// Landed: lie flat and shrink away.
+				bit.at.y = slateTop + 0.004;
+				bit.turn.set(-Math.PI / 2, 0, bit.turn.z);
+				bit.life -= dt * 0.7;
+			}
+			const size = bit.drop ? 0.5 : Math.max(0, Math.min(1, bit.life * 2));
+			bitScale.setScalar(size);
+			bits.setMatrixAt(i, bitMatrix.compose(bit.at, bitTurn.setFromEuler(bit.turn), bitScale));
+		}
+		if (moved) bits.instanceMatrix.needsUpdate = true;
+	}
+
+	// Watering grows the whole tree a couple of days' worth, as drops fall through it.
+	function water(dt: number) {
+		watering -= dt;
+		bonsai.grow(dt * 2.2);
+		bonsaiDirty = true;
+		for (let k = 0; k < 2; k++)
+			dropBit(
+				new THREE.Vector3(
+					THREE.MathUtils.lerp(canopy.min.x, canopy.max.x, Math.random()),
+					canopy.max.y + 0.25 + Math.random() * 0.2,
+					THREE.MathUtils.lerp(canopy.min.z, canopy.max.z, Math.random())
+				),
+				true
+			);
+		if (watering <= 0) {
+			bonsai.save();
+			bonsaiDirty = false;
+		}
+		emitBonsai();
+	}
+
+	function waterBonsai() {
+		if (focused !== 'bonsai' || watering > 0) return;
+		void sound.resume();
+		sound.pour();
+		watering = 1.4;
+	}
+
+	// Back to its neat shape, all at once.
+	function resetBonsai() {
+		if (focused !== 'bonsai') return;
+		const from = Float32Array.from(bonsai.lengths);
+		const k = { t: 0 };
+		gsap.to(k, {
+			t: 1,
+			duration: 0.9,
+			ease: 'power2.inOut',
+			onUpdate: () => {
+				bonsai.setAll((id) => from[id] + (1 - from[id]) * k.t);
+				emitBonsai();
+			},
+			onComplete: () => bonsai.save()
+		});
+	}
+
+	function leaveTree() {
+		shears = lookAround = null;
+		if (bonsaiDirty) bonsai.save();
+		bonsaiDirty = false;
+		canvas.style.cursor = '';
+		gsap.to(treeOrbit, { yaw: 0, pitch: 0, duration: 1, ease: 'power3.inOut' });
+	}
+
+	function emitBonsai() {
+		onBonsai({ shagginess: bonsai.shagginess() });
+	}
+
 	// The tweens record their start values when the timeline is built, so it's always built from the
 	// resting pose (the SP closed on the table).
 	const RESTING = { ...s };
@@ -1197,7 +1475,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		mode = next;
 		updateLoop();
 		if (import.meta.env.DEV)
-			Object.assign(window, { __boot: { s, timeline, scene, mode, camera, THREE } });
+			Object.assign(window, { __boot: { s, timeline, scene, mode, camera, THREE, bonsai } });
 		onMode(next);
 	}
 
@@ -1297,6 +1575,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		envMap.dispose();
 		mask.dispose();
 		rubiks.dispose();
+		if (bonsaiDirty) bonsai.save();
+		bonsai.dispose();
 		for (const picker of pickers) picker.geometry.dispose();
 		screenTexture.dispose();
 		clockTexture.dispose();
@@ -1315,6 +1595,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		setLantern,
 		scrambleCube: () => void scrambleCube(),
 		solveCube: () => void solveCube(),
+		waterBonsai,
+		resetBonsai,
 		setRadio,
 		setMuted: (muted) => sound.setMuted(muted),
 		dispose

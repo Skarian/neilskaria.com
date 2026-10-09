@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { FM_MAX, FM_MIN, player, radio, STATIONS } from '#lib/radio/player.svelte.js';
-	import type { CubeState, Room, RoomMode, Thing } from './engine';
+	import type { BonsaiState, CubeState, Room, RoomMode, Thing } from './engine';
 	import { room } from './room.svelte';
 
 	// Panels pop in like a game dialog: from small and tilted, overshooting a touch.
@@ -83,6 +83,19 @@
 	const dialAt = (freq: number) => ((freq - FM_MIN) / (FM_MAX - FM_MIN)) * 100;
 	const station = $derived(player.station());
 
+	// The bonsai's state, from the room: how long its tufts are on average, from trimmed (0.3) through
+	// neat (1) to shaggy (1.6).
+	let bonsai = $state<BonsaiState>({ shagginess: 1 });
+	const treeLooks = $derived(
+		bonsai.shagginess > 1.3
+			? 'Needs a trim'
+			: bonsai.shagginess > 1.08
+				? 'Getting shaggy'
+				: bonsai.shagginess > 0.9
+					? 'Looking neat'
+					: 'Freshly trimmed'
+	);
+
 	// Confetti for a solve: scattered pieces in the cube's colours.
 	const CONFETTI = Array.from({ length: 28 }, (_, i) => ({
 		x: Math.round(Math.sin(i * 2.4) * 190),
@@ -131,6 +144,7 @@
 				focused = thing;
 			},
 			onCube: (state) => (cube = state),
+			onBonsai: (state) => (bonsai = state),
 			// The music dips a little under the boot chime.
 			onChime: (playing) => player.duck(playing)
 		});
@@ -429,6 +443,41 @@
 				>
 					POWER <span class="toggle" aria-hidden="true"><span></span></span>
 				</button>
+			</div>
+		</aside>
+	{/if}
+
+	{#if focused === 'bonsai'}
+		<aside
+			class="panel bonsai-panel"
+			aria-label="Bonsai"
+			in:pop={{ delay: 350 }}
+			out:pop={{ duration: 220 }}
+		>
+			<p class="ribbon bonsai-ribbon">BONSAI</p>
+			<h2>{treeLooks}</h2>
+			<!-- How the tree's growing: trimmed on the left, neat in the middle, shaggy on the right. -->
+			<div
+				class="growth"
+				role="meter"
+				aria-label="Growth"
+				aria-valuemin={0.3}
+				aria-valuemax={1.6}
+				aria-valuenow={bonsai.shagginess}
+				aria-valuetext={treeLooks}
+				style:--at="{((bonsai.shagginess - 0.3) / 1.3) * 100}%"
+			>
+				<span class="neat" aria-hidden="true"></span>
+				<span class="needle" aria-hidden="true"></span>
+			</div>
+			<p class="ends" aria-hidden="true">
+				<span>TRIMMED</span><span>NEAT</span><span>SHAGGY</span>
+			</p>
+			<p class="hint">Drag across the leaves to trim them. Drag beside the tree to look around.</p>
+			<div class="actions">
+				<button class="back" onclick={() => engine?.unfocus()}>◀ BACK</button>
+				<button class="back go water" onclick={() => engine?.waterBonsai()}>WATER</button>
+				<button class="back reset" onclick={() => engine?.resetBonsai()}>↺ RESET</button>
 			</div>
 		</aside>
 	{/if}
@@ -925,6 +974,60 @@
 		flex: none;
 	}
 
+	.bonsai-ribbon {
+		background: #5f9e4f;
+	}
+
+	.actions .water {
+		background: #5ec8e8;
+	}
+
+	/* The growth meter: a track from trimmed to shaggy, a mark at neat, and a pointer for the tree. */
+	.growth {
+		position: relative;
+		width: 100%;
+		height: 1.1rem;
+		border: 3px solid var(--ink);
+		border-radius: 999px;
+		background: linear-gradient(90deg, #cfe3a8, #7fbf63 46%, #5f9e4f 54%, #3f6f2c);
+		box-shadow: inset 0 -3px 0 rgb(0 0 0 / 0.12);
+	}
+
+	.growth .neat {
+		position: absolute;
+		left: calc((1 - 0.3) / 1.3 * 100%);
+		top: -0.45rem;
+		bottom: -0.45rem;
+		width: 3px;
+		translate: -50% 0;
+		border-radius: 2px;
+		background: var(--ink);
+	}
+
+	.growth .needle {
+		position: absolute;
+		left: var(--at);
+		top: 50%;
+		width: 1.25rem;
+		height: 1.25rem;
+		translate: -50% -50%;
+		border: 3px solid var(--ink);
+		border-radius: 50%;
+		background: #fffaf0;
+		box-shadow: 0 2px 0 var(--ink);
+		transition: left 0.2s ease-out;
+	}
+
+	.ends {
+		display: flex;
+		justify-content: space-between;
+		width: 100%;
+		margin-top: -0.5rem;
+		font-size: 0.6rem;
+		letter-spacing: 0.12em;
+		opacity: 0.7;
+	}
+
 	.cube-ribbon {
 		background: #4f8fe8;
 	}
@@ -944,15 +1047,18 @@
 		background: #ff8f5a;
 	}
 
-	.cube-panel .actions {
+	.cube-panel .actions,
+	.bonsai-panel .actions {
 		gap: 0.45rem;
 	}
 
-	.cube-panel {
+	.cube-panel,
+	.bonsai-panel {
 		width: min(21.5rem, calc(100vw - 2rem));
 	}
 
-	.cube-panel .back {
+	.cube-panel .back,
+	.bonsai-panel .back {
 		padding-inline: 0.9rem;
 		white-space: nowrap;
 	}

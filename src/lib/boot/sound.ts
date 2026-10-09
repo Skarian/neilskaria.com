@@ -63,6 +63,50 @@ export async function createBootSound(chimeUrl: string, muted = false) {
 			source.connect(filter).connect(gain).connect(master);
 			source.start();
 		},
+		// A snip of the bonsai scissors: two quick metallic clicks.
+		snip() {
+			for (const [delay, freq] of [
+				[0, 5200],
+				[0.035, 3900]
+			]) {
+				const at = ctx.currentTime + delay;
+				const length = Math.floor(ctx.sampleRate * 0.025);
+				const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+				const data = buffer.getChannelData(0);
+				for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length) ** 5;
+				const source = ctx.createBufferSource();
+				const filter = ctx.createBiquadFilter();
+				filter.type = 'bandpass';
+				filter.frequency.value = freq;
+				filter.Q.value = 3;
+				const gain = ctx.createGain();
+				gain.gain.value = 0.9;
+				source.buffer = buffer;
+				source.connect(filter).connect(gain).connect(master);
+				source.start(at);
+			}
+		},
+		// Water from a watering can: a soft rush of filtered noise.
+		pour() {
+			const length = Math.floor(ctx.sampleRate * 1.5);
+			const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+			const data = buffer.getChannelData(0);
+			for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+			const source = ctx.createBufferSource();
+			const filter = ctx.createBiquadFilter();
+			filter.type = 'bandpass';
+			filter.frequency.value = 1400;
+			filter.Q.value = 0.8;
+			const gain = ctx.createGain();
+			const now = ctx.currentTime;
+			gain.gain.setValueAtTime(0, now);
+			gain.gain.linearRampToValueAtTime(0.12, now + 0.15);
+			gain.gain.setValueAtTime(0.12, now + 1.1);
+			gain.gain.linearRampToValueAtTime(0, now + 1.5);
+			source.buffer = buffer;
+			source.connect(filter).connect(gain).connect(master);
+			source.start();
+		},
 		// A little rising arpeggio for solving the cube.
 		fanfare() {
 			[523.25, 659.25, 783.99, 1046.5].forEach((f, i) => bell(ctx, master, f, i * 0.09, 0.8));
