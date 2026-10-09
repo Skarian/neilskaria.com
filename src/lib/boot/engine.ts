@@ -802,16 +802,16 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			{
 				cube: camera.aspect > 1 ? 2.75 : 2.15,
 				clock: camera.aspect > 1 ? 1.6 : 1.47,
-				bonsai: camera.aspect > 1 ? 1.45 : 1.12
+				bonsai: camera.aspect > 1 ? 1.45 : 0.98
 			}[thing as string] ?? (camera.aspect > 1 ? 2.1 : 1.85);
 		// On phones the panel covers the bottom of the screen: the object is fitted into the space left
 		// above it (further back when that's small) and centred there.
 		const portrait = camera.aspect <= 1;
 		let d = size * distance * (portrait ? THREE.MathUtils.clamp(0.5 / freeAbove, 0.8, 1.5) : 1);
-		// And never wider than a narrow screen.
-		if (portrait) {
+		// And the clock radio (the wide one) never wider than a narrow screen.
+		if (portrait && thing === 'clock') {
 			const extent = box.getSize(new THREE.Vector3());
-			const across = thing === 'cube' ? size : Math.hypot(extent.x, extent.z);
+			const across = Math.hypot(extent.x, extent.z);
 			const halfWidth = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect;
 			d = Math.max(d, (across * 0.52) / halfWidth);
 		}
