@@ -1,13 +1,20 @@
-// A first-view motion trial, using the complete room. One scene unit is 10 cm.
+// A trial of objects being set down on the nightstand as the room first appears (/lab/boot?land, or
+// ?land=2 for the cube too). It uses the room as it loads today, all at once: only the motion is
+// being judged here.
+
 import type * as THREE from 'three';
 
+// How high things start (scene units: 1 is 10 cm), how long the fall and the settle take, and how
+// far behind the console the cube comes.
 const DROP_HEIGHT = 0.7;
 const DROP_MS = 420;
 const SETTLE_MS = 200;
 const CUBE_DELAY_MS = 250;
+// The tilt each starts with (degrees), levelling out as it falls, and the roll on contact.
 const SP_TILT = { x: -3.2, z: 2.1 };
 const CUBE_TILT = { x: 2.8, z: -3 };
 const SETTLE_TILT = 3;
+// The console's soft shadow while it's at the top: this much as dark, and this much wider.
 const SHADOW_AT_HEIGHT = 0.12;
 const SHADOW_SPREAD = 0.35;
 

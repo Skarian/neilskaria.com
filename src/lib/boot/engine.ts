@@ -2039,11 +2039,11 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		onMode(next);
 	}
 
+	// Puts anything still landing at rest at once (and where a click would find it).
 	function finishLanding() {
 		if (!landing?.active) return;
 		landing.finish();
 		pose(performance.now() / 1000);
-		contact.material.opacity = 0.75 * (1 - Math.min(1, s.rise * 1.6));
 	}
 
 	async function enterSite() {
@@ -2162,7 +2162,9 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		setTimeout(() => sound.close(), 4000);
 	}
 
-	// Bounds, picking and boot framing above all use the original resting transforms.
+	// The landing trial (?land). Made last, so the bounds, picking and framing above all use the
+	// resting transforms; then the lifted pose is drawn once behind the loader, so the room's first
+	// visible frame already has the console in the air.
 	const landing =
 		options.startIn === 'room' ? createAssemblyMotion(sp, rubiks.root, contact) : null;
 	if (landing) {

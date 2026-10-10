@@ -31,9 +31,15 @@
 	const PLACE_KEY = 'room-place';
 	// Runs before the page is painted, so the room's loading screen shows straight away (on a first
 	// visit, or reloading while in the room) and a returning visit never flashes it. Until Svelte
-	// takes over, SKIP and Escape leave a note on the document as well as saving the visit.
+	// takes over it also answers SKIP and Escape: the page shows at once, and onMount picks up the skip.
 	const headScript =
-		`<script>(()=>{const root=document.documentElement;try{if((localStorage.getItem('${SEEN_KEY}')!=='1'||sessionStorage.getItem('${PLACE_KEY}')==='room')&&!matchMedia('(prefers-reduced-motion: reduce)').matches)root.dataset.intro='play'}catch(e){}const escape=e=>{if(!root.dataset.intro)return;if(e.type==='keydown'?e.key!=='Escape':!e.target.closest?.('[data-skip]'))return;e.preventDefault();e.stopImmediatePropagation();root.dataset.introSkipped='1';delete root.dataset.intro;root.style.overflow='';try{localStorage.setItem('${SEEN_KEY}','1')}catch(e){}try{sessionStorage.setItem('${PLACE_KEY}','page')}catch(e){}};document.addEventListener('pointerdown',escape,true);document.addEventListener('click',escape,true);document.addEventListener('keydown',escape,true);document.addEventListener('boot-hydrated',()=>{document.removeEventListener('pointerdown',escape,true);document.removeEventListener('click',escape,true);document.removeEventListener('keydown',escape,true)},{once:true})})();</scr` +
+		`<script>(()=>{const root=document.documentElement;` +
+		`try{if((localStorage.getItem('${SEEN_KEY}')!=='1'||sessionStorage.getItem('${PLACE_KEY}')==='room')&&!matchMedia('(prefers-reduced-motion: reduce)').matches)root.dataset.intro='play'}catch(e){}` +
+		`const skip=e=>{if(!root.dataset.intro||(e.type==='keydown'?e.key!=='Escape':!e.target.closest?.('[data-skip]')))return;` +
+		`e.preventDefault();e.stopImmediatePropagation();root.dataset.introSkipped='1';delete root.dataset.intro;root.style.overflow='';` +
+		`try{localStorage.setItem('${SEEN_KEY}','1');sessionStorage.setItem('${PLACE_KEY}','page')}catch(e){}};` +
+		`const types=['pointerdown','click','keydown'];for(const t of types)document.addEventListener(t,skip,true);` +
+		`document.addEventListener('boot-hydrated',()=>{for(const t of types)document.removeEventListener(t,skip,true)},{once:true})})()</scr` +
 		'ipt>'; // split so this file's own script tag doesn't end here
 
 	type NetworkInformation = { saveData?: boolean; effectiveType?: string };
@@ -232,39 +238,21 @@
 		// Still loading: show the page now; the room finishes loading behind it, ready for later.
 		skipped = true;
 		phase = 'page';
+		localStorage.setItem(SEEN_KEY, '1');
+		sessionStorage.setItem(PLACE_KEY, 'page');
 		hide();
-		rememberPage();
-	}
-
-	// Leaving still works if the browser won't let the site save this visit.
-	function rememberPage() {
-		try {
-			localStorage.setItem(SEEN_KEY, '1');
-		} catch {
-			// The page is already showing.
-		}
-		try {
-			sessionStorage.setItem(PLACE_KEY, 'page');
-		} catch {
-			// Nothing to restore on the next visit.
-		}
 	}
 
 	function onMode(mode: RoomMode) {
 		// (Skipped while loading: the room arriving doesn't take the page back over.)
 		if (skipped && mode === 'room') return;
-		if (mode === 'room') {
-			try {
-				sessionStorage.setItem(PLACE_KEY, 'room');
-			} catch {
-				// The room can still open without saving its place.
-			}
-		}
+		if (mode === 'room' || mode === 'site')
+			sessionStorage.setItem(PLACE_KEY, mode === 'room' ? 'room' : 'page');
 		if (mode === 'room') phase = 'room';
 		else if (mode === 'site') {
 			phase = 'page';
+			localStorage.setItem(SEEN_KEY, '1');
 			hide();
-			rememberPage();
 			room.ready = true;
 			room.open = openRoom;
 		} else phase = 'moving';
@@ -318,22 +306,15 @@
 		}
 		lanternLoaded = true;
 		const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-		// A first visit, or a reload while in the room, starts in the room.
-		let firstVisit = document.documentElement.dataset.intro === 'play' && !reduced;
-		try {
-			const inRoom = sessionStorage.getItem(PLACE_KEY) === 'room';
-			firstVisit = (localStorage.getItem(SEEN_KEY) !== '1' || inRoom) && !reduced;
-		} catch {
-			// Use the head script's choice if storage isn't available.
-		}
-		skipped = document.documentElement.dataset.introSkipped === '1';
-		delete document.documentElement.dataset.introSkipped;
+		// The head script has already decided: a first visit, or a reload while in the room, starts in
+		// the room. SKIP may have been pressed before this code arrived; from here on, skip() handles it.
+		const root = document.documentElement;
+		const firstVisit = root.dataset.intro === 'play';
+		skipped = root.dataset.introSkipped === '1';
+		delete root.dataset.introSkipped;
 		document.dispatchEvent(new Event('boot-hydrated'));
 		landingTrial = new URLSearchParams(location.search).has('land') && !reduced;
-		if (skipped || !firstVisit) {
-			phase = 'page';
-			hide();
-		}
+		if (!firstVisit) phase = 'page';
 
 		if (skipped) {
 			// An early SKIP keeps the same background load as one pressed during loading.
@@ -691,7 +672,9 @@
 		color: #f3ece2;
 	}
 
-	/* Paint the filtered page behind the loader too, so SKIP only has to uncover it. */
+	/* The page's CRT filter is slow to paint the first time (a third of a second on a phone). While
+	   loading, the loader is made a touch see-through so the browser paints the page behind it, on a
+	   layer of its own, and SKIP only has to uncover it. */
 	.room-layer.preparing {
 		opacity: 0.999;
 	}
