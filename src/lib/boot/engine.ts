@@ -10,7 +10,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { lightmapScales } from './assets';
 import { bakedLighting, bakedMaterial, fillLightmap, type BakedLighting } from './baked-material';
 import { fetchRoom } from './fetches';
-import { createBonsai, startBonsai, swayTime } from './bonsai';
+import { createBonsai, prepareBonsai, startBonsai, swayTime } from './bonsai';
 import { BOOT_DURATION, drawBootScreen } from './boot-screen';
 import { drawClockLED, drawFrequencyLED } from './clock-led';
 import { FM_MIN } from '#lib/radio/stations.js';
@@ -243,12 +243,18 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	)._loadLibrary = (_url, type) => (type === 'text' ? files.decoder.js : files.decoder.wasm);
 	draco.preload();
 	const progress = setInterval(() => onProgress(files.progress() * 0.7), 100);
-	const gltf = await new GLTFLoader()
-		.setDRACOLoader(draco)
-		.parseAsync(await files.model.finally(() => clearInterval(progress)), '');
+	const bonsaiWorker = prepareBonsai(canvas);
+	const gltf = await files.model
+		.finally(() => clearInterval(progress))
+		.then((model) => new GLTFLoader().setDRACOLoader(draco).parseAsync(model, ''))
+		.catch((error) => {
+			bonsaiWorker.cancel();
+			draco.dispose();
+			throw error;
+		});
 	onProgress(0.75);
 	draco.dispose();
-	const bonsaiGrowing = startBonsai(gltf.scene, canvas);
+	const bonsaiGrowing = startBonsai(gltf.scene, canvas, bonsaiWorker);
 	const sounding = createBootSound(files.chime, options.muted);
 	const lighting: Record<string, BakedLighting> = {};
 	const lightmapsIn: Promise<void>[] = [];

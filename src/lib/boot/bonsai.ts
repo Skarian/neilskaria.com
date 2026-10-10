@@ -31,7 +31,11 @@ export type Shoot = {
 export const swayTime = { value: 0 };
 
 // Begin as soon as the model is parsed, while the room's pictures are still arriving.
-export function startBonsai(root: THREE.Object3D, canvas: HTMLCanvasElement) {
+export function startBonsai(
+	root: THREE.Object3D,
+	canvas: HTMLCanvasElement,
+	prepared = prepareBonsai(canvas)
+) {
 	const wood = root.getObjectByName('BonsaiWood') as THREE.Mesh;
 	const pot = root.getObjectByName('BonsaiPot') as THREE.Mesh;
 	root.updateMatrixWorld(true);
@@ -64,6 +68,13 @@ export function startBonsai(root: THREE.Object3D, canvas: HTMLCanvasElement) {
 		.multiply(wood.matrixWorld)
 		.multiply(new THREE.Matrix4().set(MM, 0, 0, 0, 0, 0, MM, 0, 0, -MM, 0, 0, 0, 0, 0, 1));
 	const input: BonsaiInput = { roots: roots.roots, seed: 11, fromModel: fromModel.toArray() };
+	const buffers = growInWorker(input, prepared);
+	void buffers.catch(() => {});
+	return { ...prepared, turntable, buffers };
+}
+
+// Fetch and parse the worker while the model downloads, before pictures fill the connection queue.
+export function prepareBonsai(canvas: HTMLCanvasElement) {
 	const controller = new AbortController();
 	const { signal } = controller;
 	const cancel = () => controller.abort();
@@ -78,25 +89,20 @@ export function startBonsai(root: THREE.Object3D, canvas: HTMLCanvasElement) {
 	};
 	signal.addEventListener('abort', release, { once: true });
 	if (!canvas.isConnected) cancel();
-	const buffers = growInWorker(input, signal);
-	// Cancellation may arrive while other room preparation is running, before its await.
-	void buffers.catch(() => {});
-	return { turntable, buffers, signal, release, cancel };
-}
-
-async function growInWorker(input: BonsaiInput, signal: AbortSignal): Promise<BonsaiBuffers> {
-	try {
-		return await new Promise<BonsaiBuffers>((resolve, reject) => {
+	let worker: Worker | undefined;
+	let send: (input: BonsaiInput) => void = () => {};
+	const buffers = new Promise<BonsaiBuffers>((resolve, reject) => {
+		const finish = () => {
+			worker?.terminate();
+			signal.removeEventListener('abort', abort);
+		};
+		const abort = () => {
+			finish();
+			reject(signal.reason);
+		};
+		try {
 			signal.throwIfAborted();
-			const worker = new Worker(new URL('./bonsai.worker.ts', import.meta.url), { type: 'module' });
-			const finish = () => {
-				worker.terminate();
-				signal.removeEventListener('abort', abort);
-			};
-			const abort = () => {
-				finish();
-				reject(signal.reason);
-			};
+			worker = new Worker(new URL('./bonsai.worker.ts', import.meta.url), { type: 'module' });
 			signal.addEventListener('abort', abort, { once: true });
 			worker.onmessage = (event: MessageEvent<BonsaiBuffers>) => {
 				finish();
@@ -112,13 +118,30 @@ async function growInWorker(input: BonsaiInput, signal: AbortSignal): Promise<Bo
 				finish();
 				reject(new Error('The bonsai buffers could not be read'));
 			};
-			try {
-				worker.postMessage(input);
-			} catch (error) {
-				finish();
-				reject(error);
-			}
-		});
+			send = (input) => {
+				try {
+					signal.throwIfAborted();
+					worker!.postMessage(input);
+				} catch (error) {
+					finish();
+					reject(error);
+				}
+			};
+		} catch (error) {
+			finish();
+			reject(error);
+		}
+	});
+	// A failure or cancellation can arrive before the model has supplied its transforms.
+	void buffers.catch(() => {});
+	return { buffers, send: (input: BonsaiInput) => send(input), signal, release, cancel };
+}
+
+async function growInWorker(input: BonsaiInput, prepared: ReturnType<typeof prepareBonsai>) {
+	const { signal } = prepared;
+	try {
+		prepared.send(input);
+		return await prepared.buffers;
 	} catch {
 		signal.throwIfAborted();
 		// A blocked or unavailable worker still leaves a tree, with time for input between chunks.
