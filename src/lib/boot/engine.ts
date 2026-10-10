@@ -25,6 +25,7 @@ import {
 	type Move
 } from './rubiks';
 import { createBootSound } from './sound';
+import { createAssemblyMotion } from './assembly-motion';
 
 export type RoomMode = 'room' | 'booting' | 'site' | 'returning';
 export type Thing = 'sp' | 'cube' | 'clock' | 'lantern' | 'bonsai' | 'portrait';
@@ -61,6 +62,7 @@ export type RoomOptions = {
 };
 
 export type Room = {
+	finishLanding: () => void;
 	enterSite: () => void;
 	skipToSite: () => void;
 	returnToRoom: () => void;
@@ -1160,6 +1162,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	function busy(now: number) {
 		const active =
 			mode !== 'room' ||
+			landing?.active ||
 			now - lastInput < 300 ||
 			slash !== null ||
 			turning !== null ||
@@ -1197,6 +1200,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		drawTrail();
 
 		contact.material.opacity = 0.75 * (1 - Math.min(1, s.rise * 1.6));
+		landing?.update(time);
 		moteMaterial.opacity = (0.35 + 0.45 * s.rise) * (1 - s.dive);
 		motes.rotation.y = t * 0.03;
 		motes.position.y = Math.sin(t * 0.4) * 0.08;
@@ -1369,6 +1373,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 
 	function click(event: MouseEvent) {
 		if (mode !== 'room' || focused) return;
+		finishLanding();
 		const thing = thingAt(event);
 		if (thing === 'sp') return enterSite();
 		if (thing) focus(thing);
@@ -2028,12 +2033,22 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		mode = next;
 		updateLoop();
 		if (import.meta.env.DEV)
-			Object.assign(window, { __boot: { s, timeline, scene, mode, camera, THREE, bonsai } });
+			Object.assign(window, {
+				__boot: { s, timeline, scene, mode, camera, THREE, bonsai, landing }
+			});
 		onMode(next);
+	}
+
+	function finishLanding() {
+		if (!landing?.active) return;
+		landing.finish();
+		pose(performance.now() / 1000);
+		contact.material.opacity = 0.75 * (1 - Math.min(1, s.rise * 1.6));
 	}
 
 	async function enterSite() {
 		if (mode !== 'room') return;
+		finishLanding();
 		screenOff = false;
 		unfocus();
 		setHovered(null);
@@ -2048,6 +2063,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 
 	function skipToSite() {
 		if (mode === 'site') return;
+		finishLanding();
 		// Put down whatever's in hand at once, or coming back the camera would still be heading for it.
 		unfocus();
 		gsap.killTweensOf(focusBlend);
@@ -2146,9 +2162,19 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		setTimeout(() => sound.close(), 4000);
 	}
 
+	// Bounds, picking and boot framing above all use the original resting transforms.
+	const landing =
+		options.startIn === 'room' ? createAssemblyMotion(sp, rubiks.root, contact) : null;
+	if (landing) {
+		pose(0);
+		contact.material.opacity = 0.75;
+		landing.prepare();
+		renderer.render(scene, camera);
+	}
 	setMode(mode);
 	emitCube();
 	return {
+		finishLanding,
 		enterSite,
 		skipToSite,
 		returnToRoom,

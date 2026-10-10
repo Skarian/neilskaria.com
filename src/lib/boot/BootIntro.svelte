@@ -41,6 +41,7 @@
 	let canvas = $state<HTMLCanvasElement>();
 	let layer = $state<HTMLDivElement>();
 	let phase = $state<'page' | 'loading' | 'room' | 'moving'>('loading');
+	let landingTrial = $state(false);
 	let progress = $state(0);
 	let pressed = $state(false);
 	let focused = $state<Thing | null>(null);
@@ -280,6 +281,7 @@
 
 	function start() {
 		if (phase !== 'room' || pressed) return;
+		engine?.finishLanding();
 		// Let the button visibly press before the room starts moving.
 		pressed = true;
 		setTimeout(() => {
@@ -327,6 +329,7 @@
 		skipped = document.documentElement.dataset.introSkipped === '1';
 		delete document.documentElement.dataset.introSkipped;
 		document.dispatchEvent(new Event('boot-hydrated'));
+		landingTrial = new URLSearchParams(location.search).has('land') && !reduced;
 		if (skipped || !firstVisit) {
 			phase = 'page';
 			hide();
@@ -370,7 +373,7 @@
 <svelte:window onkeydown={keydown} />
 
 <div bind:this={layer} class="room-layer" aria-hidden={phase === 'page'}>
-	<canvas bind:this={canvas} class:live={phase !== 'loading'}></canvas>
+	<canvas bind:this={canvas} class:live={phase !== 'loading'} class:landing={landingTrial}></canvas>
 
 	{#if phase === 'loading'}
 		<p class="loading" aria-live="polite">LOADING {Math.round(progress * 100)}%</p>
@@ -383,7 +386,7 @@
 				onclick={start}
 				aria-label="Start: open the site"
 				data-start
-				in:pop={{ delay: 450 }}
+				in:pop={{ delay: landingTrial ? 0 : 450 }}
 				out:pop={{ duration: 220 }}
 			>
 				<span class="ring" aria-hidden="true"></span>
@@ -701,6 +704,11 @@
 		height: 100%;
 		opacity: 0;
 		transition: opacity 0.9s ease;
+	}
+
+	/* The trial shows the whole room at once, so the short landing can be judged from its start. */
+	canvas.landing {
+		transition: none;
 	}
 
 	canvas.live {
