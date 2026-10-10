@@ -2048,6 +2048,11 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 
 	function skipToSite() {
 		if (mode === 'site') return;
+		// Put down whatever's in hand at once, or coming back the camera would still be heading for it.
+		unfocus();
+		gsap.killTweensOf(focusBlend);
+		focusBlend.value = 0;
+		setHovered(null);
 		timeline?.kill();
 		timeline = timelineFor();
 		timeline.progress(1, true);
