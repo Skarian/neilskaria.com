@@ -10,7 +10,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { introAssets, lightmapScales } from './assets';
 import { bakedMaterial, loadBakedLighting, type BakedLighting } from './baked-material';
 import { createBonsai, swayTime } from './bonsai';
-import portraitUrl from './assets/portrait.png?url';
+import portraitUrl from './assets/portrait.webp?url';
 import { BOOT_DURATION, drawBootScreen } from './boot-screen';
 import { drawClockLED, drawFrequencyLED } from './clock-led';
 import { FM_MIN } from '#lib/radio/stations.js';

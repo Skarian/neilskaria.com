@@ -865,7 +865,8 @@ bpy.ops.export_scene.gltf(
 	export_apply=True,
 	export_yup=True,
 	export_extras=True,
-	export_draco_mesh_compression_enable=True,
-	export_draco_mesh_compression_level=7,
+	# Left uncompressed: assets/3d/pack.mjs compresses it (once) for the web.
+	export_draco_mesh_compression_enable=False,
 )
 print('Exported', OUT_DIR / 'bedroom.glb')
+print('Next: copy it and the lightmaps into assets/3d/export/, then `npm run pack-room`.')
