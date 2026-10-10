@@ -26,20 +26,34 @@ function download() {
 	// The model, counting its bytes as they come (it's most of the wait).
 	let loaded = 0;
 	let total = 0;
-	const model = get(introAssets.model).then(async (response) => {
-		// (A compressed download's length is its compressed size, so this is only a guide.)
-		total = Number(response.headers.get('content-length')) || 0;
-		if (!response.body || !total) return response.arrayBuffer();
-		const chunks: Uint8Array[] = [];
-		const reader = response.body.getReader();
-		for (;;) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			chunks.push(value);
-			loaded += value.length;
-		}
-		return new Blob(chunks as BlobPart[]).arrayBuffer();
-	});
+	const read = (url: string) =>
+		get(url).then(async (response) => {
+			// (A compressed download's length is its compressed size, so this is only a guide.)
+			total = Number(response.headers.get('content-length')) || 0;
+			loaded = 0;
+			if (!response.body || !total) return response.arrayBuffer();
+			const chunks: Uint8Array[] = [];
+			const reader = response.body.getReader();
+			for (;;) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				chunks.push(value);
+				loaded += value.length;
+			}
+			return new Blob(chunks as BlobPart[]).arrayBuffer();
+		});
+	// On the site, a compressed copy of the model (see scripts/precompress.mjs), which the browser
+	// unpacks as it arrives; if that's missing or comes out wrong, the model as it is.
+	const isModel = (bytes: ArrayBuffer) =>
+		new TextDecoder().decode(new Uint8Array(bytes, 0, Math.min(4, bytes.byteLength))) === 'glTF';
+	const model = (
+		import.meta.env.PROD
+			? read(`${introAssets.model}.br`).then((bytes) => {
+					if (!isModel(bytes)) throw new Error('compressed model unreadable');
+					return bytes;
+				})
+			: Promise.reject(new Error('development'))
+	).catch(() => read(introAssets.model));
 	const decoder = {
 		js: get(DECODER.js).then((r) => r.text()),
 		wasm: get(DECODER.wasm).then((r) => r.arrayBuffer())
