@@ -143,7 +143,6 @@ function applyLocal() {
 		if (!radio.on) return;
 		const ctx = new AudioContext({ latencyHint: 'playback' });
 		local = { ctx, synth: createRadio(ctx, ctx.destination) };
-		if (import.meta.env.DEV) Object.assign(window, { __local: local });
 	}
 	if (radio.on) void local.ctx.resume();
 	// In a background tab on a streamed station, everything local goes quiet: phones pause the

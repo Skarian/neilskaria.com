@@ -7,14 +7,12 @@ type YTPlayer = {
 	cueVideoById(id: string): void;
 	playVideo(): void;
 	pauseVideo(): void;
-	stopVideo(): void;
 	setVolume(volume: number): void;
 	getDuration(): number;
 	getCurrentTime(): number;
 	getPlayerState(): number;
 	mute(): void;
 	unMute(): void;
-	destroy(): void;
 };
 
 type YTNamespace = {
@@ -154,10 +152,7 @@ export function createStreamPlayer(onStatus: (status: StreamStatus, id: string |
 							origin: location.origin
 						},
 						events: {
-							onReady: (event) => {
-								if (import.meta.env.DEV) Object.assign(window, { __stream: event.target });
-								resolve(event.target);
-							},
+							onReady: (event) => resolve(event.target),
 							onStateChange: (event) => {
 								// 1 playing, 3 buffering, 2 paused, 0 ended, 5 cued, -1 unstarted.
 								if (event.data === 1) onStatus(inAd ? 'ad' : 'playing', current);

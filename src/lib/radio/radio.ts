@@ -71,7 +71,7 @@ function grove(play: Play, step: number, time: number, length: number) {
 
 const midi = (n: number) => 440 * Math.pow(2, (n - 69) / 12);
 
-function players(ctx: AudioContext, out: AudioNode, noise: AudioBuffer) {
+function players(ctx: AudioContext, out: AudioNode) {
 	function envelope(time: number, peak: number, attack: number, length: number, release: number) {
 		const gain = ctx.createGain();
 		gain.gain.setValueAtTime(0, time);
@@ -91,55 +91,8 @@ function players(ctx: AudioContext, out: AudioNode, noise: AudioBuffer) {
 		return o;
 	}
 
-	function noiseHit(
-		time: number,
-		gain: number,
-		type: BiquadFilterType,
-		freq: number,
-		decay: number
-	) {
-		const source = ctx.createBufferSource();
-		source.buffer = noise;
-		const filter = ctx.createBiquadFilter();
-		filter.type = type;
-		filter.frequency.value = freq;
-		const g = ctx.createGain();
-		g.gain.setValueAtTime(gain, time);
-		g.gain.exponentialRampToValueAtTime(0.0001, time + decay);
-		source.connect(filter).connect(g).connect(out);
-		source.start(time, Math.random() * 1.5);
-		source.stop(time + decay + 0.05);
-	}
-
 	return {
-		tone(
-			time: number,
-			note: number,
-			length: number,
-			gain: number,
-			type: OscillatorType,
-			cutoff?: number
-		) {
-			const env = envelope(time, gain, 0.005, length * 0.6, length * 0.6);
-			let to: AudioNode = env;
-			if (cutoff) {
-				const filter = ctx.createBiquadFilter();
-				filter.type = 'lowpass';
-				filter.frequency.value = cutoff;
-				filter.connect(env);
-				to = filter;
-			}
-			osc(type, midi(note), time, time + length * 2, to);
-		},
-		// An electric piano: a sine with a quieter octave, fading slowly.
-		keys(time: number, note: number, length: number, gain: number) {
-			const env = envelope(time, gain, 0.01, 0.05, length);
-			osc('sine', midi(note), time, time + length * 2, env);
-			const shimmer = ctx.createGain();
-			shimmer.gain.value = 0.25;
-			shimmer.connect(env);
-			osc('triangle', midi(note + 12), time, time + length * 2, shimmer);
-		},
+		// A soft synth pad under the tune.
 		pad(time: number, note: number, length: number, gain: number, attack = 0.4) {
 			const env = envelope(time, gain, attack, Math.max(0, length - attack), 1.2);
 			const filter = ctx.createBiquadFilter();
@@ -148,16 +101,6 @@ function players(ctx: AudioContext, out: AudioNode, noise: AudioBuffer) {
 			filter.connect(env);
 			for (const detune of [-7, 7])
 				osc('sawtooth', midi(note), time, time + length + 2, filter).detune.value = detune;
-		},
-		bell(time: number, note: number, gain: number) {
-			const env = envelope(time, gain, 0.005, 0, 2.2);
-			osc('sine', midi(note), time, time + 4, env);
-			// The overtone fades faster than the note, and is silent before it stops.
-			const overtone = ctx.createGain();
-			overtone.gain.setValueAtTime(0.3, time);
-			overtone.gain.setTargetAtTime(0, time, 0.25);
-			overtone.connect(env);
-			osc('sine', midi(note) * 2.76, time, time + 2, overtone);
 		},
 		// An ocarina: a pure, breathy tone that swells in, with a gentle vibrato once it's held.
 		ocarina(time: number, note: number, length: number, gain: number) {
@@ -185,21 +128,6 @@ function players(ctx: AudioContext, out: AudioNode, noise: AudioBuffer) {
 			ring.gain.setTargetAtTime(0, time, 0.08);
 			ring.connect(env);
 			osc('sine', midi(note) * 2, time, time + 1, ring);
-		},
-		kick(time: number, gain: number) {
-			const env = ctx.createGain();
-			env.gain.setValueAtTime(gain, time);
-			env.gain.exponentialRampToValueAtTime(0.0001, time + 0.35);
-			env.connect(out);
-			const o = osc('sine', 150, time, time + 0.4, env);
-			o.frequency.setValueAtTime(150, time);
-			o.frequency.exponentialRampToValueAtTime(45, time + 0.25);
-		},
-		snare(time: number, gain: number) {
-			noiseHit(time, gain, 'bandpass', 1800, 0.18);
-		},
-		hat(time: number, gain: number) {
-			noiseHit(time, gain, 'highpass', 7000, 0.05);
 		}
 	};
 }
@@ -250,7 +178,7 @@ export function createRadio(ctx: AudioContext, out: AudioNode) {
 		{
 			program: { freq: GROVE.freq, step: grove },
 			gain: groveGain,
-			play: players(ctx, groveGain, noise),
+			play: players(ctx, groveGain),
 			stepLength: 60 / GROVE_BPM / 4,
 			next: 0,
 			level: 0
@@ -312,8 +240,6 @@ export function createRadio(ctx: AudioContext, out: AudioNode) {
 			level = state.volume;
 			update();
 		},
-		// What's coming out right now (for checking by hand).
-		levels: () => ({ hiss: hissGain.gain.value, volume: volume.gain.value }),
 		dispose() {
 			clearInterval(timer);
 			hiss.stop();

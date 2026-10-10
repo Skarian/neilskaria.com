@@ -8,8 +8,8 @@ import * as THREE from 'three';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { introAssets, lightmapScales } from './assets';
-import { bakedMaterial, loadBakedLighting, swayTime, type BakedLighting } from './baked-material';
-import { createBonsai } from './bonsai';
+import { bakedMaterial, loadBakedLighting, type BakedLighting } from './baked-material';
+import { createBonsai, swayTime } from './bonsai';
 import portraitUrl from './assets/portrait.png?url';
 import { BOOT_DURATION, drawBootScreen } from './boot-screen';
 import { drawClockLED, drawFrequencyLED } from './clock-led';
@@ -29,7 +29,8 @@ import { createBootSound } from './sound';
 export type RoomMode = 'room' | 'booting' | 'site' | 'returning';
 export type Thing = 'sp' | 'cube' | 'clock' | 'lantern' | 'bonsai' | 'portrait';
 
-// The bonsai, as the panel shows it: its tufts' average length (0.3 trimmed, 1 neat, 1.6 shaggy).
+// The bonsai, as the panel shows it: how far its shoots reach on average (0 bare, 1 neat, about 1.7
+// wild).
 export type BonsaiState = { shagginess: number };
 
 // The Rubik's cube game, as the panel shows it.
@@ -287,7 +288,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			});
 		} else if (group) {
 			const key = `${object.material.uuid}:${group}`;
-			baked[key] ??= bakedMaterial(object.material, lighting[group], { sway: group === 'foliage' });
+			baked[key] ??= bakedMaterial(object.material, lighting[group]);
 			object.material = baked[key];
 		} else if (object.name === 'Sky') {
 			object.material = new THREE.MeshBasicMaterial({
@@ -313,13 +314,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		} else if (object.name === 'PowerLed') {
 			object.material = object.material.clone();
 			ledMaterial = object.material;
-		} else if (name === 'Chrome') {
-			// Polished steel (the tumbler's base band) is lit by reflections.
-			object.material = new THREE.MeshStandardMaterial({
-				color: '#d4d6da',
-				metalness: 1,
-				roughness: 0.25
-			});
 		} else if (name === 'LanternPaper') {
 			// The kumiko lantern's washi paper, lit from inside.
 			object.material = new THREE.MeshBasicMaterial({ color: LANTERN_PAPER.clone() });
@@ -330,12 +324,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			// Only there for Blender previews; the site draws the display itself.
 			object.visible = false;
 		}
-		if (/^Cube(White|Green|Blue|Red|Orange)$/.test(object.material.name)) {
-			// The stickers sit a hair off the cube's body; always draw them in front of it.
-			object.material.polygonOffset = true;
-			object.material.polygonOffsetFactor = -2;
-			object.material.polygonOffsetUnits = -2;
-		}
 		// The cube rests exactly on the tabletop; lift it a hair so its underside doesn't flicker
 		// through the table.
 		if (/^Cube/.test(object.name)) object.position.y += 0.003;
@@ -344,62 +332,24 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	screen.material = screenMaterial;
 
 	// A framed pixel-art portrait (Neil, his wife and their dog) hanging on the wall above the clock
-	// radio. The art is 180 x 240 pixels, twelve frames of sparkling water, packed into one column
-	// and played a frame at a time, kept pixel-sharp. Lit live, like the other things that move.
-	const PORTRAIT = { x: -1.3, y: 2.06, width: 1.6, wall: -2.9, depth: 0.09, border: 0.11 };
+	// radio, baked with the wall (its frame's shadow, the lantern's glow across it). The art is 180 x
+	// 240 pixels, twelve frames of sparkling water packed into one column, played a frame at a time
+	// and kept pixel-sharp, under the wall's baked light.
 	const PORTRAIT_FRAMES = 12;
 	const portraitArt = await new THREE.TextureLoader().loadAsync(portraitUrl);
-	const portrait = new THREE.Group();
-	portrait.name = 'Portrait';
+	portraitArt.colorSpace = THREE.SRGBColorSpace;
+	portraitArt.magFilter = THREE.NearestFilter;
+	portraitArt.anisotropy = renderer.capabilities.getMaxAnisotropy();
+	portraitArt.repeat.set(1, 1 / PORTRAIT_FRAMES);
 	{
-		const h = (PORTRAIT.width * 240) / 180;
-		portraitArt.colorSpace = THREE.SRGBColorSpace;
-		portraitArt.magFilter = THREE.NearestFilter;
-		portraitArt.anisotropy = renderer.capabilities.getMaxAnisotropy();
-		portraitArt.repeat.set(1, 1 / PORTRAIT_FRAMES);
-		const picture = new THREE.Mesh(
-			new THREE.PlaneGeometry(PORTRAIT.width, h),
-			new THREE.MeshStandardMaterial({ map: portraitArt, roughness: 0.55 })
+		const picture = gltf.scene.getObjectByName('PortraitPicture') as THREE.Mesh;
+		// glTF counts texture rows from the top; this texture's are from the bottom.
+		const uv = picture.geometry.attributes.uv;
+		for (let i = 0; i < uv.count; i++) uv.setY(i, 1 - uv.getY(i));
+		picture.material = bakedMaterial(
+			new THREE.MeshStandardMaterial({ map: portraitArt }),
+			lighting.wall
 		);
-		picture.position.z = PORTRAIT.depth * 0.55;
-		portrait.add(picture);
-		// A simple dark-oak frame: four bevelled sides around the picture, standing proud of it.
-		const wood = new THREE.MeshStandardMaterial({ color: '#4a2e1c', roughness: 0.6 });
-		const b = PORTRAIT.border;
-		for (const [w, hh, x, y] of [
-			[PORTRAIT.width + b * 2, b, 0, h / 2 + b / 2],
-			[PORTRAIT.width + b * 2, b, 0, -h / 2 - b / 2],
-			[b, h, -PORTRAIT.width / 2 - b / 2, 0],
-			[b, h, PORTRAIT.width / 2 + b / 2, 0]
-		]) {
-			const side = new THREE.Mesh(new THREE.BoxGeometry(w, hh, PORTRAIT.depth), wood);
-			side.position.set(x, y, PORTRAIT.depth / 2);
-			portrait.add(side);
-		}
-		// Hung from a nail, so it leans out from the wall a touch at the bottom.
-		portrait.position.set(PORTRAIT.x, PORTRAIT.y, PORTRAIT.wall + 0.005);
-		portrait.rotation.x = THREE.MathUtils.degToRad(-2.5);
-		gltf.scene.add(portrait);
-		// Lit as the wall it hangs on: each point takes the wall's baked light from just behind it, so
-		// the picture and frame match the wall exactly, and tint and dim with the lantern like it.
-		const wall = gltf.scene.getObjectByName('WallRight') as THREE.Mesh;
-		const toWall = new THREE.Raycaster();
-		const back = new THREE.Vector3(0, 0, -1);
-		const at = new THREE.Vector3();
-		portrait.updateMatrixWorld(true);
-		portrait.traverse((o) => {
-			if (!(o instanceof THREE.Mesh)) return;
-			const position = o.geometry.attributes.position;
-			const uv1 = new Float32Array(position.count * 2);
-			for (let i = 0; i < position.count; i++) {
-				at.fromBufferAttribute(position, i).applyMatrix4(o.matrixWorld);
-				toWall.set(at.setZ(PORTRAIT.wall + 1), back);
-				const hit = toWall.intersectObject(wall, false)[0];
-				if (hit?.uv1) uv1.set([hit.uv1.x, hit.uv1.y], i * 2);
-			}
-			o.geometry.setAttribute('uv1', new THREE.BufferAttribute(uv1, 2));
-			o.material = bakedMaterial(o.material as THREE.MeshStandardMaterial, lighting.wall);
-		});
 	}
 
 	// The Rubik's cube is rebuilt as a working puzzle where the modelled one sits, from its materials.
@@ -444,7 +394,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	const CUBE_LIFT = CUBE_FROM.clone().multiplyScalar(cubeSize * 2.4);
 
 	// The bonsai: its foliage grown here, on a turntable, lit live so it can turn (see bonsai.ts).
-	const bonsai = createBonsai(gltf.scene, { value: new THREE.Texture() });
+	const bonsai = createBonsai(gltf.scene);
 	bonsai.load();
 	live.push(...bonsai.materials);
 	// Cut clumps fall onto the slate (or the table) and shrink away; water drops fall through the tree.
@@ -662,7 +612,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			pickers.push(picker);
 		}
 	}
-	// Back to where the visitor left the tree turned.
 
 	// A soft contact shadow under the console while it rests on the nightstand.
 	const contact = new THREE.Mesh(
@@ -883,7 +832,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		gsap.to(lantern, { level, duration: 0.5, ease: 'power2.out', onUpdate: applyLantern });
 	}
 
-	// Where the camera goes to look at an object up close, leaving room on the right for its panel.
 	// The direction each object is looked at from when focused (towards the camera), chosen so nothing
 	// stands in front of it; the default is from the front, slightly right and above.
 	const FOCUS_FROM: Partial<Record<Thing, THREE.Vector3>> = {
@@ -928,9 +876,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 				? new THREE.Vector3(0.2, 0.85, 1)
 				: (FOCUS_FROM[thing] ?? new THREE.Vector3(0.12, 0.22, 1));
 		const dir = from.clone().normalize();
-		// The cube is small: further back, so there's room to turn it over.
-		// The cube is small, so further back to leave room to turn it over; the clock radio is wide, so
-		// closer in, to read its dial.
 		const upright = camera.aspect <= 1;
 		// How much of the space it's given each object fills (the cube less, to leave room to turn it).
 		const fill =
@@ -1197,7 +1142,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			if (/^Clock/.test(o.name)) return 'clock';
 			if (/^(Kumiko|LanternPaper)/.test(o.name)) return 'lantern';
 			if (/^Bonsai/.test(o.name)) return 'bonsai';
-			if (o.name === 'Portrait') return 'portrait';
+			if (/^Portrait/.test(o.name)) return 'portrait';
 		}
 		return null;
 	}
@@ -1222,7 +1167,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	function setHovered(thing: Thing | null) {
 		if (thing === hovered) return;
 		hovered = thing;
-		if (import.meta.env.DEV) Object.assign(window, { __hovered: thing });
 		for (const key of Object.keys(hover) as Thing[]) {
 			const on = key === thing;
 			gsap.to(hover, {
@@ -1252,13 +1196,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		if (mode !== 'room' || focused) return;
 		const thing = thingAt(event);
 		if (thing === 'sp') return enterSite();
-		if (thing) return focus(thing);
-		// Not playable yet: a little hop says so.
-		if (thing)
-			gsap
-				.timeline()
-				.to(hover, { [thing]: 2.2, duration: 0.18, ease: 'power2.out' })
-				.to(hover, { [thing]: hovered === thing ? 1 : 0, duration: 0.5, ease: 'bounce.out' });
+		if (thing) focus(thing);
 	}
 
 	// Playing with the cube. Pressing on it and dragging turns the layer under the pointer, in
@@ -1574,11 +1512,10 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 
 	// The turntable clicks round a notch at a time: every 12 degrees.
 	const NOTCH = THREE.MathUtils.degToRad(12);
-	let notchesFrom = 0;
 	function turnTree(by: number, byHand = false) {
-		const before = Math.floor((bonsai.turntable.rotation.y - notchesFrom) / NOTCH);
+		const before = Math.floor(bonsai.turntable.rotation.y / NOTCH);
 		bonsai.turntable.rotation.y += by;
-		const after = Math.floor((bonsai.turntable.rotation.y - notchesFrom) / NOTCH);
+		const after = Math.floor(bonsai.turntable.rotation.y / NOTCH);
 		if (before !== after && focused === 'bonsai') {
 			sound.ratchet(Math.min(1, 0.45 + Math.abs(by) * 6));
 			// A tick you can feel, on phones that can (Android; iPhones' browsers can't vibrate).

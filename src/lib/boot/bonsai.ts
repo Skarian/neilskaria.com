@@ -6,7 +6,6 @@
 // lit live (rather than baked), so it can be turned all the way round.
 
 import * as THREE from 'three';
-import { swayTime } from './baked-material';
 
 const KEY = 'bonsai-shoots';
 // The model's units: props.py works in millimetres, at 0.01 units each (before the tree's own scale).
@@ -45,16 +44,12 @@ export type Shoot = {
 	triangles: number[];
 };
 
-export function createBonsai(root: THREE.Object3D, lengthsUniform: { value: THREE.Texture }) {
+// The clock for the foliage's gentle sway (set each frame by the room).
+export const swayTime = { value: 0 };
+
+export function createBonsai(root: THREE.Object3D) {
 	const random = mulberry32(11);
 	const rand = (a = 0, b = 1) => a + (b - a) * random();
-
-	// The old, fixed foliage goes; the new foliage replaces it.
-	const old: THREE.Object3D[] = [];
-	root.traverse((o) => {
-		if (/^Bonsai(Needle|Core)/.test(o.name)) old.push(o);
-	});
-	for (const o of old) o.removeFromParent();
 
 	const wood = root.getObjectByName('BonsaiWood') as THREE.Mesh;
 	const pot = root.getObjectByName('BonsaiPot') as THREE.Mesh;
@@ -348,7 +343,7 @@ export function createBonsai(root: THREE.Object3D, lengthsUniform: { value: THRE
 	for (let s = 0; s < count; s++) lengths[s] = shoots[s].neat;
 	const texture = new THREE.DataTexture(lengths, WIDTH, rows, THREE.RedFormat, THREE.FloatType);
 	texture.needsUpdate = true;
-	lengthsUniform.value = texture;
+	const lengthsUniform = { value: texture };
 	// Uneven growth: each shoot its own pace, the top of the tree fastest.
 	const pace = new Float32Array(count);
 	let lowest = Infinity;

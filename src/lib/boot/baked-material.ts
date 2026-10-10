@@ -13,14 +13,7 @@ export type BakedLighting = {
 	lampTint: { value: THREE.Color };
 };
 
-// Shared clock for the foliage's sway.
-export const swayTime = { value: 0 };
-
-export function bakedMaterial(
-	source: THREE.MeshStandardMaterial,
-	lighting: BakedLighting,
-	options: { glow?: THREE.Color; sway?: boolean } = {}
-) {
+export function bakedMaterial(source: THREE.MeshStandardMaterial, lighting: BakedLighting) {
 	const material = new THREE.MeshBasicMaterial({
 		map: source.map,
 		color: source.color,
@@ -35,57 +28,20 @@ export function bakedMaterial(
 		shader.uniforms.lampMap = { value: lighting.lamp };
 		shader.uniforms.lampScale = { value: lighting.lampScale * Math.PI };
 		shader.uniforms.lampTint = lighting.lampTint;
-		shader.uniforms.glow = { value: options.glow ?? new THREE.Color(0, 0, 0) };
-		// Foliage gets a soft fill on the side facing the camera: the lantern lights it from behind,
-		// which on its own leaves the leaves we see in shadow.
-		shader.uniforms.fill = {
-			value: options.sway
-				? new THREE.Color('#ffd9a8').multiplyScalar(0.55)
-				: new THREE.Color(0, 0, 0)
-		};
 		shader.fragmentShader = shader.fragmentShader
 			.replace(
 				'#include <lightmap_pars_fragment>',
 				`#include <lightmap_pars_fragment>
 				uniform sampler2D lampMap;
 				uniform float lampScale;
-				uniform vec3 lampTint;
-				uniform vec3 glow;
-				uniform vec3 fill;`
+				uniform vec3 lampTint;`
 			)
 			.replace(
 				'reflectedLight.indirectDiffuse += lightMapTexel.rgb * lightMapIntensity * RECIPROCAL_PI;',
 				`vec3 lampTexel = texture2D( lampMap, vLightMapUv ).rgb;
 				reflectedLight.indirectDiffuse += ( lightMapTexel.rgb * lightMapIntensity + lampTexel * lampScale * lampTint ) * RECIPROCAL_PI;`
-			)
-			.replace(
-				'vec3 outgoingLight = reflectedLight.indirectDiffuse;',
-				'vec3 outgoingLight = reflectedLight.indirectDiffuse + diffuseColor.rgb * ( glow * lampTint + fill );'
 			);
-		if (options.sway) {
-			// A very gentle sway: whole pads drift slowly, more towards the top of the tree, with a
-			// faint flutter in the needles.
-			shader.uniforms.swayTime = swayTime;
-			shader.vertexShader = shader.vertexShader
-				.replace(
-					'#include <common>',
-					`#include <common>
-					uniform float swayTime;`
-				)
-				.replace(
-					'#include <begin_vertex>',
-					`#include <begin_vertex>
-					float reach = smoothstep( 1.2, 2.4, position.y );
-					float drift = sin( swayTime * 0.9 + position.x * 2.5 ) + 0.5 * sin( swayTime * 1.7 + position.z * 3.1 );
-					float flutter = sin( swayTime * 3.1 + dot( position, vec3( 61.0, 47.0, 53.0 ) ) );
-					transformed.x += reach * ( drift * 0.012 + flutter * 0.0015 );
-					transformed.z += reach * ( cos( swayTime * 0.7 + position.x * 2.1 ) * 0.008 );`
-				);
-		}
 	};
-	// three.js caches compiled shaders by the source of onBeforeCompile, which is the same for every
-	// baked material; the foliage's version (with sway) has to be told apart from the rest.
-	material.customProgramCacheKey = () => (options.sway ? 'baked-foliage' : 'baked');
 	return material;
 }
 

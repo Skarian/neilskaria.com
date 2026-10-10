@@ -57,7 +57,6 @@ export async function createBootSound(chimeUrl: string, muted = false) {
 	}
 
 	return {
-		hasChime: chime !== null,
 		resume: () => ctx.resume(),
 		setMuted(value: boolean) {
 			master.gain.setTargetAtTime(value ? 0 : 1, ctx.currentTime, 0.02);
