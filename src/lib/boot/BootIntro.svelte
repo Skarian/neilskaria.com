@@ -372,7 +372,12 @@
 
 <svelte:window onkeydown={keydown} />
 
-<div bind:this={layer} class="room-layer" aria-hidden={phase === 'page'}>
+<div
+	bind:this={layer}
+	class="room-layer"
+	class:preparing={phase === 'loading'}
+	aria-hidden={phase === 'page'}
+>
 	<canvas bind:this={canvas} class:live={phase !== 'loading'} class:landing={landingTrial}></canvas>
 
 	{#if phase === 'loading'}
@@ -684,6 +689,15 @@
 		background: #0b0a0e;
 		font-family: ui-monospace, monospace;
 		color: #f3ece2;
+	}
+
+	/* Paint the filtered page behind the loader too, so SKIP only has to uncover it. */
+	.room-layer.preparing {
+		opacity: 0.999;
+	}
+
+	:global(.crt-content) {
+		will-change: transform;
 	}
 
 	:global(html[data-intro]) .room-layer {
