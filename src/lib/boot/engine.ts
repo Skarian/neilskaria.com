@@ -10,7 +10,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { lightmapScales } from './assets';
 import { bakedLighting, bakedMaterial, fillLightmap, type BakedLighting } from './baked-material';
 import { fetchRoom } from './fetches';
-import { createBonsai, swayTime } from './bonsai';
+import { createBonsai, startBonsai, swayTime } from './bonsai';
 import { BOOT_DURATION, drawBootScreen } from './boot-screen';
 import { drawClockLED, drawFrequencyLED } from './clock-led';
 import { FM_MIN } from '#lib/radio/stations.js';
@@ -248,6 +248,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		.parseAsync(await files.model.finally(() => clearInterval(progress)), '');
 	onProgress(0.75);
 	draco.dispose();
+	const bonsaiGrowing = startBonsai(gltf.scene, canvas);
 	const sounding = createBootSound(files.chime, options.muted);
 	const lighting: Record<string, BakedLighting> = {};
 	const lightmapsIn: Promise<void>[] = [];
@@ -415,7 +416,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	const CUBE_LIFT = CUBE_FROM.clone().multiplyScalar(cubeSize * 2.4);
 
 	// The bonsai: its foliage grown here, on a turntable, lit live so it can turn (see bonsai.ts).
-	const bonsai = createBonsai(gltf.scene);
+	const bonsai = await createBonsai(bonsaiGrowing);
+	await breathe();
 	bonsai.load();
 	live.push(...bonsai.materials);
 	// Cut clumps fall onto the slate (or the table) and shrink away; water drops fall through the tree.
