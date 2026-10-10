@@ -3,6 +3,8 @@
 
 import model from './assets/bedroom.glb?url';
 import chime from './assets/gba-boot.mp3?url';
+import portrait from './assets/portrait.webp?url';
+import env from './assets/env.webp?url';
 import scales from './assets/lightmaps.json';
 
 const lightmapFiles = import.meta.glob('./assets/*-{day,lamp}.webp', {
@@ -21,4 +23,4 @@ export const lightmaps = Object.fromEntries(
 
 export const lightmapScales: Record<string, Record<string, number>> = scales;
 
-export const introAssets = { model, chime, lightmaps };
+export const introAssets = { model, chime, portrait, env, lightmaps };

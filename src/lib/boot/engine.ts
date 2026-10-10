@@ -7,10 +7,10 @@ import { gsap } from 'gsap';
 import * as THREE from 'three';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { introAssets, lightmapScales } from './assets';
-import { bakedMaterial, loadBakedLighting, type BakedLighting } from './baked-material';
+import { lightmapScales } from './assets';
+import { bakedLighting, bakedMaterial, fillLightmap, type BakedLighting } from './baked-material';
+import { fetchRoom } from './fetches';
 import { createBonsai, swayTime } from './bonsai';
-import portraitUrl from './assets/portrait.webp?url';
 import { BOOT_DURATION, drawBootScreen } from './boot-screen';
 import { drawClockLED, drawFrequencyLED } from './clock-led';
 import { FM_MIN } from '#lib/radio/stations.js';
@@ -233,23 +233,30 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	let hovered: Thing | null = null;
 	let disposed = false;
 
-	// Load everything up front, so nothing stutters once it's moving.
+	// Load everything up front, so nothing stutters once it's moving. The files are already on their
+	// way (see fetches.ts): the model first, then the pictures, which arrive while the room is built.
+	const files = fetchRoom();
 	const draco = new DRACOLoader().setDecoderPath('/draco/');
+	// (Its decoder comes from those downloads too.)
+	(
+		draco as unknown as { _loadLibrary: (url: string, type: string) => Promise<unknown> }
+	)._loadLibrary = (_url, type) => (type === 'text' ? files.decoder.js : files.decoder.wasm);
+	draco.preload();
+	const progress = setInterval(() => onProgress(files.progress() * 0.7), 100);
 	const gltf = await new GLTFLoader()
 		.setDRACOLoader(draco)
-		.loadAsync(introAssets.model, (event) => {
-			if (event.total) onProgress((event.loaded / event.total) * 0.7);
-		});
-	const lighting: Record<string, BakedLighting> = {};
-	for (const group of Object.keys(lightmapScales)) {
-		lighting[group] = await loadBakedLighting(
-			group,
-			lightmapScales,
-			introAssets.lightmaps,
-			lampTint
-		);
-	}
+		.parseAsync(await files.model.finally(() => clearInterval(progress)), '');
+	onProgress(0.75);
 	draco.dispose();
+	const sounding = createBootSound(files.chime, options.muted);
+	const lighting: Record<string, BakedLighting> = {};
+	const lightmapsIn: Promise<void>[] = [];
+	for (const group of Object.keys(lightmapScales)) {
+		lighting[group] = bakedLighting(group, lightmapScales, lampTint);
+		lightmapsIn.push(fillLightmap(lighting[group].base, files.lightmaps[`${group}-day`]));
+		if (lightmapScales[group].lamp !== undefined)
+			lightmapsIn.push(fillLightmap(lighting[group].lamp, files.lightmaps[`${group}-lamp`]));
+	}
 	scene.add(gltf.scene);
 
 	const sp = gltf.scene.getObjectByName('SP')!;
@@ -336,7 +343,21 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	// 240 pixels, twelve frames of sparkling water packed into one column, played a frame at a time
 	// and kept pixel-sharp, under the wall's baked light.
 	const PORTRAIT_FRAMES = 12;
-	const portraitArt = await new THREE.TextureLoader().loadAsync(portraitUrl);
+	const portraitArt = new THREE.Texture();
+	// (Upside down, as glTF has it; its rows are flipped back below.)
+	const portraitIn = files.portrait
+		.then((file) =>
+			createImageBitmap(file, {
+				imageOrientation: 'flipY',
+				premultiplyAlpha: 'none',
+				colorSpaceConversion: 'none'
+			})
+		)
+		.then((bitmap) => {
+			portraitArt.image = bitmap;
+			portraitArt.needsUpdate = true;
+		});
+	portraitArt.flipY = false;
 	portraitArt.colorSpace = THREE.SRGBColorSpace;
 	portraitArt.magFilter = THREE.NearestFilter;
 	portraitArt.anisotropy = renderer.capabilities.getMaxAnisotropy();
@@ -657,15 +678,28 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	contact.position.set(rest.x, rest.y - 0.145, rest.z);
 	scene.add(contact);
 
-	// Things that move (the console, the cube) are lit live, from a capture of the baked room. Only
-	// the visible corner of the room is modelled, so a warm colour stands in for the rest of it.
-	sp.visible = false;
-	const pmrem = new THREE.PMREMGenerator(renderer);
-	scene.background = new THREE.Color(0.66, 0.52, 0.42);
-	const envMap = pmrem.fromScene(scene, 0.02, 0.05, 100, { position: FLOAT }).texture;
-	scene.background = new THREE.Color('#120f0c');
-	pmrem.dispose();
-	sp.visible = true;
+	// Things that move (the console, the cube, the bonsai) are lit live, with reflections of the baked
+	// room: captured from it ahead of time (npm run capture-env) and loaded with its other pictures.
+	const envMap = new THREE.Texture();
+	envMap.mapping = THREE.CubeUVReflectionMapping;
+	envMap.colorSpace = THREE.SRGBColorSpace;
+	envMap.flipY = false;
+	envMap.generateMipmaps = false;
+	envMap.minFilter = envMap.magFilter = THREE.LinearFilter;
+	const envIn = files.env
+		.then((file) =>
+			createImageBitmap(file, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })
+		)
+		.then((bitmap) => {
+			envMap.image = bitmap;
+			envMap.needsUpdate = true;
+		});
+
+	// Everything from here on needs the room's pictures.
+	await Promise.all([...lightmapsIn, portraitIn, envIn]);
+	onProgress(0.9);
+	await breathe();
+	if (import.meta.env.DEV && new URLSearchParams(location.search).has('capture-env')) captureEnv();
 	for (const material of live) {
 		material.envMap = envMap;
 		// Matched by eye to the baked props beside it (the bonsai, being rougher, takes less).
@@ -715,10 +749,33 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	camera.lookAt(view.target);
 	computeFinalCamera();
 
-	const sound = await createBootSound(introAssets.chime, options.muted);
-	onProgress(0.9);
+	const sound = await sounding;
 	await document.fonts.ready;
+	// Shaders for everything, and the pictures onto the GPU, a piece at a time, then one frame drawn
+	// behind the loading screen: so the first real frame, and the first tap, don't stall.
 	await renderer.compileAsync(scene, camera);
+	await breathe();
+	{
+		// The variants that only appear later: the console's lit screen, a cut clump of foliage.
+		const extras = new THREE.Scene();
+		const lit = screenMaterial.clone();
+		lit.map = screenTexture;
+		extras.add(new THREE.Mesh(screen.geometry, lit));
+		const clump = bonsai.clump(0, 0);
+		if (clump) extras.add(clump);
+		renderer.compile(extras, camera, scene);
+		clump?.geometry.dispose();
+	}
+	for (const group of Object.values(lighting)) {
+		renderer.initTexture(group.base);
+		renderer.initTexture(group.lamp);
+		await breathe();
+	}
+	renderer.initTexture(envMap);
+	renderer.initTexture(portraitArt);
+	await breathe();
+	renderer.render(scene, camera);
+	await breathe();
 
 	const raycaster = new THREE.Raycaster();
 	addEventListener('resize', resize);
@@ -732,6 +789,48 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	// Touches turn the cube rather than scroll or zoom anything.
 	canvas.style.touchAction = 'none';
 	onProgress(1);
+
+	// Lets the browser get on with anything else waiting (input, scrolling) between steps of building
+	// the room, so it never holds the page up for long.
+	function breathe() {
+		const scheduler = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler;
+		return scheduler?.yield ? scheduler.yield() : new Promise((resolve) => setTimeout(resolve, 0));
+	}
+
+	// (Development only: renders the reflections the way the room once did on every load, for
+	// assets/3d/capture-env.mjs to save. The room must be as it is at this point: no lights yet, the
+	// console hidden, a warm colour behind.)
+	function captureEnv() {
+		sp.visible = false;
+		const pmrem = new THREE.PMREMGenerator(renderer);
+		scene.background = new THREE.Color(0.66, 0.52, 0.42);
+		const target = pmrem.fromScene(scene, 0.02, 0.05, 100, { position: FLOAT });
+		scene.background = new THREE.Color('#120f0c');
+		pmrem.dispose();
+		sp.visible = true;
+		const { width, height } = target;
+		const half = new Uint16Array(width * height * 4);
+		renderer.readRenderTargetPixels(target, 0, 0, width, height, half);
+		const canvas = document.createElement('canvas');
+		canvas.width = width;
+		canvas.height = height;
+		const ctx = canvas.getContext('2d')!;
+		const image = ctx.createImageData(width, height);
+		const srgb = (v: number) =>
+			Math.round(
+				255 *
+					THREE.MathUtils.clamp(v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055, 0, 1)
+			);
+		for (let i = 0; i < width * height; i++) {
+			for (let c = 0; c < 3; c++)
+				image.data[i * 4 + c] = srgb(THREE.DataUtils.fromHalfFloat(half[i * 4 + c]));
+			image.data[i * 4 + 3] = 255;
+		}
+		// (Rows as read, bottom first: the texture is uploaded without flipping.)
+		ctx.putImageData(image, 0, 0);
+		(window as unknown as { __env?: string }).__env = canvas.toDataURL('image/png');
+		target.dispose();
+	}
 
 	function softDot(rgb: string) {
 		const dot = document.createElement('canvas');
@@ -1051,16 +1150,45 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		onFocus(null);
 	}
 
+	// While nothing's happening the room is drawn 30 times a second, not 60 (or 120): the dust and the
+	// bonsai's sway are slow enough not to show it, and it halves what the room costs a phone. Anything
+	// happening (a touch, an animation, the tree coasting round) brings it straight back to full rate.
+	// (?idle=60 shows the room as it was, to compare.)
+	const idleFps = Number(new URLSearchParams(location.search).get('idle')) || 30;
+	let lastInput = 0;
+	let activeUntil = 0;
+	function busy(now: number) {
+		const active =
+			mode !== 'room' ||
+			now - lastInput < 300 ||
+			slash !== null ||
+			turning !== null ||
+			fingers.size > 0 ||
+			Math.abs(spin) > 0.0005 ||
+			watering > 0 ||
+			clumps.length > 0 ||
+			bitState.some((b) => b.life > 0) ||
+			parallax.distanceTo(pointer) > 0.002 ||
+			gsap.globalTimeline.getChildren(true, true, true).length > 0;
+		if (active) activeUntil = now + 500;
+		return now < activeUntil;
+	}
+	let lastRendered = 0;
+
 	function render(time: number) {
+		if (idleFps < 60 && !busy(time) && time - lastRendered < 1000 / idleFps - 2) return;
+		lastRendered = time;
 		const t = time / 1000;
-		const dt = Math.min(0.05, lastFrame ? t - lastFrame : 0);
+		// (Time since the last frame drawn; the simulations take it in steps of at most 0.05 s.)
+		const elapsed = lastFrame ? Math.min(0.25, t - lastFrame) : 0;
+		const dt = Math.min(0.05, elapsed);
 		lastFrame = t;
 		swayTime.value = t;
 		pose(t);
 		// The portrait's water sparkles: a frame every tenth of a second (frame 0 is at the top).
 		portraitArt.offset.y = 1 - ((Math.floor(t * 10) % PORTRAIT_FRAMES) + 1) / PORTRAIT_FRAMES;
 		if (!turning && Math.abs(spin) > 0.0005) {
-			turnTree(spin);
+			turnTree(spin * elapsed * 60);
 			spin *= Math.pow(0.04, dt);
 		}
 		if (watering > 0) water(dt);
@@ -1075,7 +1203,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 
 		// In the room the camera drifts gently with the pointer.
 		const calm = (1 - s.drift) * (1 - s.dive);
-		parallax.lerp(pointer, 0.05);
+		parallax.lerp(pointer, 1 - Math.pow(0.95, elapsed * 60));
 		if (s.dive > 0) {
 			camera.position.lerpVectors(near, finalPos, s.dive);
 			camera.quaternion.slerpQuaternions(nearQuat, finalQuat, s.dive);
@@ -1188,6 +1316,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	}
 
 	function pointermove(event: PointerEvent) {
+		lastInput = performance.now();
 		const rect = canvas.getBoundingClientRect();
 		pointer.set(
 			((event.clientX - rect.left) / rect.width) * 2 - 1,
@@ -1298,6 +1427,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	}
 
 	function pointerdown(event: PointerEvent) {
+		lastInput = performance.now();
 		if (focused === 'bonsai' && mode === 'room') {
 			canvas.setPointerCapture(event.pointerId);
 			fingers.set(event.pointerId, event.clientX);
@@ -1675,12 +1805,15 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	}
 
 	// The trail: a bright stroke that thins and fades from its tail.
+	// (Cleared only when there was something to clear: an empty canvas is left alone.)
+	let trailDrawn = false;
 	function drawTrail() {
 		const now = performance.now();
 		while (trailPoints.length && now - trailPoints[0].at > 260) trailPoints.shift();
 		const scale = trail.width / innerWidth;
-		trailCtx.clearRect(0, 0, trail.width, trail.height);
-		if (trailPoints.length < 2) return;
+		if (trailDrawn) trailCtx.clearRect(0, 0, trail.width, trail.height);
+		trailDrawn = trailPoints.length >= 2;
+		if (!trailDrawn) return;
 		trailCtx.lineCap = 'round';
 		for (let i = 1; i < trailPoints.length; i++) {
 			const a = trailPoints[i - 1];
@@ -1885,6 +2018,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 
 	// Rendering runs only while the room is on screen: not behind the page, not in a hidden tab.
 	function updateLoop() {
+		// (Coming back, the first frame doesn't count the time away.)
+		lastFrame = 0;
 		renderer.setAnimationLoop(mode === 'site' || document.hidden ? null : render);
 	}
 

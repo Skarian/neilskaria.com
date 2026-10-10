@@ -17,7 +17,8 @@
 		"lint": "prettier --check . && eslint .",
 		"format": "prettier --write .",
 		"ui:add": "svelte-kit sync && shadcn-svelte add",
-		"pack-room": "node assets/3d/pack.mjs"
+		"pack-room": "node assets/3d/pack.mjs",
+		"capture-env": "node assets/3d/capture-env.mjs"
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",

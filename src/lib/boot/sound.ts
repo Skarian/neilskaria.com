@@ -1,6 +1,6 @@
 // Sound for the room: the boot chime, a click for the cartridge, and the cube's clacks. If the chime can't be loaded, a synthesized stand-in plays so the timing still lands.
 
-export async function createBootSound(chimeUrl: string, muted = false) {
+export async function createBootSound(chimeFile: Promise<ArrayBuffer>, muted = false) {
 	const ctx = new AudioContext();
 	// Everything plays through one master gain, so muting works instantly, even mid-chime.
 	const master = ctx.createGain();
@@ -8,8 +8,7 @@ export async function createBootSound(chimeUrl: string, muted = false) {
 	master.connect(ctx.destination);
 	let chime: AudioBuffer | null = null;
 	try {
-		const res = await fetch(chimeUrl);
-		if (res.ok) chime = await ctx.decodeAudioData(await res.arrayBuffer());
+		chime = await ctx.decodeAudioData(await chimeFile);
 	} catch {
 		chime = null;
 	}

@@ -48,27 +48,34 @@ export function bakedMaterial(source: THREE.MeshStandardMaterial, lighting: Bake
 const NO_LAMP = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
 NO_LAMP.needsUpdate = true;
 
-export async function loadBakedLighting(
+// A group's lighting, to build materials with straight away; its pictures are filled in as they
+// arrive (see fillLightmap), before anything is drawn.
+export function bakedLighting(
 	group: string,
 	scales: Record<string, Record<string, number>>,
-	urls: Record<string, string>,
 	lampTint: { value: THREE.Color }
 ) {
-	const loader = new THREE.TextureLoader();
-	const load = async (state: string) => {
-		const texture = await loader.loadAsync(urls[`${group}-${state}`]);
-		texture.flipY = false;
-		texture.channel = 1;
-		texture.colorSpace = THREE.SRGBColorSpace;
-		return texture;
+	const texture = () => {
+		const t = new THREE.Texture();
+		t.flipY = false;
+		t.channel = 1;
+		t.colorSpace = THREE.SRGBColorSpace;
+		return t;
 	};
-	const hasLamp = scales[group].lamp !== undefined;
-	const [base, lamp] = await Promise.all([load('day'), hasLamp ? load('lamp') : NO_LAMP]);
 	return {
-		base,
-		lamp,
+		base: texture(),
+		lamp: scales[group].lamp !== undefined ? texture() : NO_LAMP,
 		baseScale: scales[group].day,
 		lampScale: scales[group].lamp ?? 0,
 		lampTint
 	} satisfies BakedLighting;
+}
+
+// A lightmap's picture from its file, decoded off the main thread.
+export async function fillLightmap(texture: THREE.Texture, file: Promise<Blob>) {
+	texture.image = await createImageBitmap(await file, {
+		premultiplyAlpha: 'none',
+		colorSpaceConversion: 'none'
+	});
+	texture.needsUpdate = true;
 }

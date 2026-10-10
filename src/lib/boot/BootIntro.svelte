@@ -2,6 +2,7 @@
 	import { onMount, tick } from 'svelte';
 	import { FM_MAX, FM_MIN, player, radio, STATIONS, STREAMS } from '#lib/radio/player.svelte.js';
 	import type { BonsaiState, CubeState, Room, RoomMode, Thing } from './engine';
+	import { fetchRoom } from './fetches';
 	import { room } from './room.svelte';
 
 	// Panels pop in like a game dialog: from small and tilted, overshooting a touch.
@@ -65,6 +66,8 @@
 		if (lanternLoaded) localStorage.setItem(LANTERN_KEY, JSON.stringify({ color, level }));
 	});
 	let engine: Room | undefined;
+	// SKIP pressed before the room had loaded: it goes straight to the page once it has.
+	let skipped = false;
 	// Muting is site-wide: the room's sounds and the radio together.
 	$effect(() => {
 		const muted = radio.muted;
@@ -186,6 +189,7 @@
 	}
 
 	async function load(startIn: 'room' | 'site') {
+		fetchRoom();
 		const { createRoom } = await import('./engine');
 		engine = await createRoom({
 			canvas: canvas!,
@@ -217,9 +221,23 @@
 		});
 		engine.setLantern(lanternColor, lanternLevel);
 		engine.setRadio({ on: radio.on, freq: radio.freq });
+		if (skipped) engine.skipToSite();
+	}
+
+	function skip() {
+		if (engine) return engine.skipToSite();
+		if (phase !== 'loading') return;
+		// Still loading: show the page now; the room finishes loading behind it, ready for later.
+		skipped = true;
+		phase = 'page';
+		localStorage.setItem(SEEN_KEY, '1');
+		sessionStorage.setItem(PLACE_KEY, 'page');
+		hide();
 	}
 
 	function onMode(mode: RoomMode) {
+		// (Skipped while loading: the room arriving doesn't take the page back over.)
+		if (skipped && mode === 'room') return;
 		if (mode === 'room' || mode === 'site')
 			sessionStorage.setItem(PLACE_KEY, mode === 'room' ? 'room' : 'page');
 		if (mode === 'room') phase = 'room';
@@ -261,7 +279,7 @@
 			start();
 		} else if (event.key === 'Escape') {
 			if (focused) engine?.unfocus();
-			else engine?.skipToSite();
+			else skip();
 		} else if (event.key === 'm' || event.key === 'M') {
 			toggleSound();
 		}
@@ -333,6 +351,7 @@
 				in:pop={{ delay: 450 }}
 				out:pop={{ duration: 220 }}
 			>
+				<span class="ring" aria-hidden="true"></span>
 				START
 			</button>
 		</div>
@@ -604,7 +623,7 @@
 			<span class="toggle" aria-hidden="true"><span></span></span>
 		</button>
 		{#if phase !== 'page'}
-			<button class="pill skip" onclick={() => engine?.skipToSite()}
+			<button class="pill skip" onclick={skip}
 				>SKIP<svg class="arrow" viewBox="0 0 12 12" aria-hidden="true"
 					><path d="M3 1.5 10 6l-7 4.5z" /></svg
 				></button
@@ -692,38 +711,32 @@
 			box-shadow 0.08s;
 	}
 
-	/* A ring of the lantern's colours travels round the button, with a soft glow of the same colours
-	   behind it that brightens on hover. */
-	@property --angle {
-		syntax: '<angle>';
-		initial-value: 0deg;
-		inherits: false;
-	}
-
-	.start button::before {
-		content: '';
+	/* A ring of the lantern's colours travels round the button, brightening on hover. (The colours
+	   are painted once on a square that turns behind a ring-shaped mask, so the browser only moves it,
+	   rather than repainting the ring every frame.) */
+	.start .ring {
 		position: absolute;
 		inset: -3px;
 		border-radius: inherit;
-		background: conic-gradient(
-			from var(--angle),
-			#ffe2bf,
-			#ff9a5c,
-			#ff7fa6,
-			#9be36f,
-			#5ec8e8,
-			#ffe2bf
-		);
-		animation: orbit 3s linear infinite;
+		overflow: hidden;
 		pointer-events: none;
 		padding: 3px;
 		mask:
 			linear-gradient(#000 0 0) content-box exclude,
 			linear-gradient(#000 0 0);
+		transition: filter 0.2s;
 	}
 
-	.start button::before {
-		transition: filter 0.2s;
+	.start .ring::before {
+		content: '';
+		position: absolute;
+		left: 50%;
+		top: 50%;
+		width: 120%;
+		aspect-ratio: 1;
+		translate: -50% -50%;
+		background: conic-gradient(#ffe2bf, #ff9a5c, #ff7fa6, #9be36f, #5ec8e8, #ffe2bf);
+		animation: orbit 3s linear infinite;
 	}
 
 	.start button:hover {
@@ -735,13 +748,13 @@
 			inset 0 1px 0 rgb(255 255 255 / 0.28);
 	}
 
-	.start button:hover::before {
+	.start button:hover .ring {
 		filter: brightness(1.2) saturate(1.3);
 	}
 
 	@keyframes orbit {
 		to {
-			--angle: 360deg;
+			rotate: 360deg;
 		}
 	}
 
@@ -1612,7 +1625,7 @@
 	@media (prefers-reduced-motion: reduce) {
 		.loading,
 		.start,
-		.start button::before {
+		.start .ring::before {
 			animation: none;
 		}
 	}
