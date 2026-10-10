@@ -513,6 +513,10 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		depthTest: false,
 		depthWrite: false
 	});
+	// The bonsai's foliage can't be drawn with those (its shoots show only as far as they've grown), so
+	// it has copies of its own on layers 3 (as the hovered object) and 4 (as one in front of it).
+	const shootsMask = bonsai.outlineShoots(maskMaterial.clone());
+	const shootsOccluder = bonsai.outlineShoots(occluderMaterial.clone());
 	const outlinePass = new THREE.Mesh(
 		new THREE.PlaneGeometry(2, 2),
 		new THREE.ShaderMaterial({
@@ -528,10 +532,16 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 				void main() {
 					float inside = texture2D( mask, vUv ).r;
 					float near = 0.0;
+					float around = 0.0;
 					for ( int i = 0; i < 12; i++ ) {
 						float a = float( i ) * 0.5236;
-						near = max( near, texture2D( mask, vUv + vec2( cos( a ), sin( a ) ) * texel * 2.5 ).r );
+						float r = texture2D( mask, vUv + vec2( cos( a ), sin( a ) ) * texel * 2.5 ).r;
+						near = max( near, r );
+						around += r;
 					}
+					// A pixel mostly surrounded by the object (a little gap between the bonsai's needles)
+					// counts as inside it, so only the object's outer edge is outlined.
+					inside = max( inside, step( 7.5, around ) );
 					float edge = clamp( near - inside, 0.0, 1.0 ) * ( 1.0 - texture2D( mask, vUv ).g );
 					gl_FragColor = vec4( 1.0, 0.98, 0.94, edge * opacity );
 				}`,
@@ -569,6 +579,37 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	}
 	screen.geometry.computeBoundingBox();
 
+	// Points spread over a mesh's shape: one per cell of a grid over it (cells across its longest
+	// side), whatever order its vertices come in, so re-exporting the model can't nudge the framing or
+	// the click shapes. (In the mesh's own space, kept.)
+	const spreads = new Map<string, THREE.Vector3[]>();
+	function spread(geometry: THREE.BufferGeometry, cells: number) {
+		const key = `${geometry.uuid}:${cells}`;
+		let points = spreads.get(key);
+		if (points) return points;
+		const position = geometry.attributes.position;
+		geometry.computeBoundingBox();
+		const box = geometry.boundingBox!;
+		const size = box.getSize(new THREE.Vector3());
+		const cell = Math.max(size.x, size.y, size.z) / cells || 1;
+		const best = new Map<number, THREE.Vector3>();
+		const p = new THREE.Vector3();
+		for (let i = 0; i < position.count; i++) {
+			p.fromBufferAttribute(position, i);
+			const key =
+				Math.floor((p.x - box.min.x) / cell) +
+				Math.floor((p.y - box.min.y) / cell) * 1024 +
+				Math.floor((p.z - box.min.z) / cell) * 1048576;
+			// (The cell's least point, by x then y then z: the same whatever the order.)
+			const b = best.get(key);
+			if (!b || p.x < b.x || (p.x === b.x && (p.y < b.y || (p.y === b.y && p.z < b.z))))
+				best.set(key, p.clone());
+		}
+		points = [...best.values()];
+		spreads.set(key, points);
+		return points;
+	}
+
 	// What's under the pointer is decided against a simple stand-in for each object: its convex
 	// outline, where it rests. Clicks don't fall through gaps (between the bonsai's leaves, say) to
 	// whatever's behind, and a hovered object floating up doesn't slip out from under the pointer.
@@ -586,9 +627,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		// (Most objects are one shape, whatever their parts are called; the cube's pieces have no names.)
 		for (const part of PICK_PARTS[thing] ?? [null]) {
 			const parts = meshes.filter(([m, of]) => of === thing && (!part || part.test(m.name)));
-			const count = parts.reduce((n, [m]) => n + m.geometry.attributes.position.count, 0);
-			// A few thousand points are plenty for an outline.
-			const every = Math.max(1, Math.floor(count / 4000));
 			const points: THREE.Vector3[] = [];
 			for (const [mesh] of parts) {
 				// The bonsai's foliage holds room to grow wild: its shape is taken as it looks neat.
@@ -598,11 +636,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 							points.push(node.clone().applyMatrix4(bonsai.turntable.matrixWorld));
 					continue;
 				}
-				const position = mesh.geometry.attributes.position;
-				for (let i = 0; i < position.count; i += every)
-					points.push(
-						new THREE.Vector3().fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld)
-					);
+				for (const p of spread(mesh.geometry, 20))
+					points.push(p.clone().applyMatrix4(mesh.matrixWorld));
 			}
 			if (points.length < 4) continue;
 			const picker = new THREE.Mesh(new ConvexGeometry(points));
@@ -918,12 +953,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		else {
 			for (const o of parts) {
 				if (!(o instanceof THREE.Mesh) || /^Bonsai(Shoots|Slate)/.test(o.name)) continue;
-				const position = o.geometry.attributes.position;
-				const every = Math.max(1, Math.floor(position.count / 600));
-				for (let i = 0; i < position.count; i += every)
-					corners.push(
-						new THREE.Vector3().fromBufferAttribute(position, i).applyMatrix4(o.matrixWorld)
-					);
+				for (const p of spread(o.geometry, 12)) corners.push(p.clone().applyMatrix4(o.matrixWorld));
 			}
 			if (thing === 'bonsai')
 				for (const shoot of bonsai.shoots)
@@ -1093,9 +1123,19 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			renderer.clear();
 			renderer.autoClear = false;
 			renderer.render(scene, camera);
+			scene.overrideMaterial = null;
+			if (outline.thing === 'bonsai') {
+				camera.layers.set(3);
+				renderer.render(scene, camera);
+			}
 			scene.overrideMaterial = occluderMaterial;
 			camera.layers.set(2);
 			renderer.render(scene, camera);
+			scene.overrideMaterial = null;
+			if (shootsOccluder.layers.mask) {
+				camera.layers.set(4);
+				renderer.render(scene, camera);
+			}
 			renderer.autoClear = true;
 			renderer.setRenderTarget(null);
 			camera.layers.set(0);
@@ -1180,11 +1220,16 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			// Objects nearer the camera than the hovered one hide its outline where they overlap it.
 			const distance = (t: Thing) => centreOf[t].distanceTo(camera.position);
 			for (const [mesh, of] of meshes) {
-				if (of === thing) mesh.layers.enable(1);
+				const shoots = mesh.name === 'BonsaiShoots';
+				if (of === thing && !shoots) mesh.layers.enable(1);
 				else mesh.layers.disable(1);
-				if (of !== thing && distance(of) < distance(thing)) mesh.layers.enable(2);
+				if (of !== thing && !shoots && distance(of) < distance(thing)) mesh.layers.enable(2);
 				else mesh.layers.disable(2);
 			}
+			shootsMask.layers.disableAll();
+			shootsOccluder.layers.disableAll();
+			if (thing === 'bonsai') shootsMask.layers.enable(3);
+			else if (distance('bonsai') < distance(thing)) shootsOccluder.layers.enable(4);
 			outline.thing = thing;
 			if (outline.opacity > 0.5) outline.opacity = 0.5;
 		}

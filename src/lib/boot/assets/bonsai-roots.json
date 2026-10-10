@@ -1,0 +1,11 @@
+{
+	"version": 1,
+	"about": "Where each foliage pad's twig leaves the trunk, in the model's millimetres (props.py axes), in PADS order. Taken once from the shipped BonsaiWood mesh, so re-encoding the model can't move them.",
+	"roots": [
+		[20.75840234756466, -0.3765404224396035, 179.0907502174377],
+		[-70.52863836288454, 2.812641859054536, 155.51452636718744],
+		[45.73153257369991, -4.026967287063626, 99.62477684020993],
+		[106.2600970268249, 1.7056524753570268, 135.62827110290525],
+		[9.279978275299042, 45.629382133483844, 182.4380755424499]
+	]
+}

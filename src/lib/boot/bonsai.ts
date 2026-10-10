@@ -6,6 +6,7 @@
 // lit live (rather than baked), so it can be turned all the way round.
 
 import * as THREE from 'three';
+import roots from './assets/bonsai-roots.json';
 
 const KEY = 'bonsai-shoots';
 // The model's units: props.py works in millimetres, at 0.01 units each (before the tree's own scale).
@@ -98,34 +99,7 @@ export function createBonsai(root: THREE.Object3D) {
 		.multiply(wood.matrixWorld)
 		.multiply(new THREE.Matrix4().set(MM, 0, 0, 0, 0, 0, MM, 0, 0, -MM, 0, 0, 0, 0, 0, 1));
 	const normalFromModel = new THREE.Matrix3().getNormalMatrix(fromModel);
-	const toModel = new THREE.Matrix4().copy(fromModel).invert();
 	const local = (v: THREE.Vector3) => v.clone().applyMatrix4(fromModel);
-
-	// The branches' surface, in millimetres, for twigs to grow from.
-	const woodPoints: THREE.Vector3[] = [];
-	{
-		const position = wood.geometry.attributes.position;
-		const woodToModel = new THREE.Matrix4()
-			.copy(toModel)
-			.multiply(new THREE.Matrix4().copy(turntable.matrixWorld).invert())
-			.multiply(wood.matrixWorld);
-		for (let i = 0; i < position.count; i += 3)
-			woodPoints.push(
-				new THREE.Vector3().fromBufferAttribute(position, i).applyMatrix4(woodToModel)
-			);
-	}
-	const nearestWood = (to: THREE.Vector3) => {
-		let best = woodPoints[0];
-		let d = Infinity;
-		for (const p of woodPoints) {
-			const dd = p.distanceToSquared(to);
-			if (dd < d) {
-				d = dd;
-				best = p;
-			}
-		}
-		return best.clone();
-	};
 
 	// Twigs: tapered tubes, fixed (only the shoots on them can be cut).
 	const twig = { position: [] as number[], normal: [] as number[] };
@@ -178,13 +152,13 @@ export function createBonsai(root: THREE.Object3D) {
 	const triangleCount = () => leaf.position.length / 9;
 
 	const up = new THREE.Vector3(0, 0, 1);
-	for (const pad of PADS) {
+	for (const [p, pad] of PADS.entries()) {
 		const c = new THREE.Vector3(...pad.centre);
 		const r = new THREE.Vector3(...pad.size);
 		// A twig from the nearest branch up into the pad (which also joins up any pad left floating),
 		// then forking to a few hubs inside it.
 		const base = c.clone().add(new THREE.Vector3(0, 0, -r.z * 0.35));
-		const from = nearestWood(c.clone().add(new THREE.Vector3(0, 0, -r.z * 0.9)));
+		const from = new THREE.Vector3(...(roots.roots[p] as [number, number, number]));
 		const span = from.distanceTo(base);
 		tube(
 			[
@@ -364,43 +338,56 @@ export function createBonsai(root: THREE.Object3D) {
 	foliageGeometry.setAttribute('shootId', new THREE.Float32BufferAttribute(leaf.shoot, 1));
 	foliageGeometry.setAttribute('node', new THREE.Float32BufferAttribute(leaf.node, 1));
 	foliageGeometry.setAttribute('anchor', new THREE.Float32BufferAttribute(leaf.anchor, 3));
-	const foliageMaterial = new THREE.MeshStandardMaterial({
-		vertexColors: true,
-		side: THREE.DoubleSide,
-		roughness: 0.8
-	});
-	foliageMaterial.onBeforeCompile = (shader) => {
-		shader.uniforms.shootLengths = lengthsUniform;
-		shader.uniforms.swayTime = swayTime;
-		shader.vertexShader = shader.vertexShader
-			.replace(
-				'#include <common>',
-				`#include <common>
-				uniform sampler2D shootLengths;
-				uniform float swayTime;
-				attribute float shootId;
-				attribute float node;
-				attribute vec3 anchor;`
-			)
-			.replace(
-				'#include <begin_vertex>',
-				`#include <begin_vertex>
-				// A node shows once its shoot reaches it, growing out from the node before it.
-				int id = int( shootId + 0.5 );
-				int width = textureSize( shootLengths, 0 ).x;
-				float reach = texelFetch( shootLengths, ivec2( id % width, id / width ), 0 ).r;
-				transformed = anchor + ( transformed - anchor ) * clamp( reach - node, 0.0, 1.0 );
-				// A very gentle sway, more towards the top.
-				float high = smoothstep( 0.9, 1.6, position.y );
-				transformed.x += high * sin( swayTime * 0.9 + position.x * 25.0 ) * 0.004;
-				transformed.z += high * cos( swayTime * 0.7 + position.z * 21.0 ) * 0.003;`
-			);
-	};
-	foliageMaterial.customProgramCacheKey = () => 'bonsai-shoots';
+	// Any material drawing the foliage shows only as much of each shoot as has grown, and sways.
+	function growing<M extends THREE.Material>(material: M) {
+		material.onBeforeCompile = (shader) => {
+			shader.uniforms.shootLengths = lengthsUniform;
+			shader.uniforms.swayTime = swayTime;
+			shader.vertexShader = shader.vertexShader
+				.replace(
+					'#include <common>',
+					`#include <common>
+					uniform sampler2D shootLengths;
+					uniform float swayTime;
+					attribute float shootId;
+					attribute float node;
+					attribute vec3 anchor;`
+				)
+				.replace(
+					'#include <begin_vertex>',
+					`#include <begin_vertex>
+					// A node shows once its shoot reaches it, growing out from the node before it.
+					int id = int( shootId + 0.5 );
+					int width = textureSize( shootLengths, 0 ).x;
+					float reach = texelFetch( shootLengths, ivec2( id % width, id / width ), 0 ).r;
+					transformed = anchor + ( transformed - anchor ) * clamp( reach - node, 0.0, 1.0 );
+					// A very gentle sway, more towards the top.
+					float high = smoothstep( 0.9, 1.6, position.y );
+					transformed.x += high * sin( swayTime * 0.9 + position.x * 25.0 ) * 0.004;
+					transformed.z += high * cos( swayTime * 0.7 + position.z * 21.0 ) * 0.003;`
+				);
+		};
+		material.customProgramCacheKey = () => 'bonsai-shoots';
+		return material;
+	}
+	const foliageMaterial = growing(
+		new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.8 })
+	);
 	const foliage = new THREE.Mesh(foliageGeometry, foliageMaterial);
 	foliage.name = 'BonsaiShoots';
 	foliage.frustumCulled = false;
 	turntable.add(foliage);
+
+	// The foliage again, for the room's hover outline: drawn only into the outline's mask (on its own
+	// layer), and as the tree looks now rather than as all the room it has to grow.
+	function outlineShoots(material: THREE.Material) {
+		const mesh = new THREE.Mesh(foliageGeometry, growing(material));
+		mesh.name = 'BonsaiShootsOutline';
+		mesh.frustumCulled = false;
+		mesh.layers.disableAll();
+		turntable.add(mesh);
+		return mesh;
+	}
 
 	const twigGeometry = new THREE.BufferGeometry();
 	twigGeometry.setAttribute('position', new THREE.Float32BufferAttribute(twig.position, 3));
@@ -429,7 +416,10 @@ export function createBonsai(root: THREE.Object3D) {
 		const geometry = new THREE.BufferGeometry();
 		for (const name of ['position', 'normal', 'color']) {
 			const source = foliageGeometry.attributes[name] as THREE.BufferAttribute;
-			geometry.setAttribute(name, new THREE.BufferAttribute(source.array.slice(t0 * 9, t1 * 9), 3));
+			geometry.setAttribute(
+				name,
+				new THREE.BufferAttribute(source.array.slice(t0 * 9, t1 * 9), 3, source.normalized)
+			);
 		}
 		turntable.updateMatrixWorld();
 		geometry.applyMatrix4(turntable.matrixWorld);
@@ -487,9 +477,16 @@ export function createBonsai(root: THREE.Object3D) {
 	function load() {
 		try {
 			const saved = JSON.parse(localStorage.getItem(KEY) ?? 'null');
-			if (saved?.count !== count) return;
+			if (saved?.count !== count || !Number.isFinite(saved.at)) return;
 			const text = atob(saved.lengths);
-			for (let s = 0; s < count; s++) lengths[s] = text.charCodeAt(s) / 10;
+			if (text.length !== count) return;
+			// Only a whole, sensible tree is taken; anything else leaves the neat one.
+			const reaches = new Float32Array(count);
+			for (let s = 0; s < count; s++) {
+				reaches[s] = text.charCodeAt(s) / 10;
+				if (reaches[s] > shoots[s].nodes.length + 0.05) return;
+			}
+			lengths.set(reaches);
 			texture.needsUpdate = true;
 			grow(Math.max(0, (Date.now() - saved.at) / 86_400_000));
 		} catch {
@@ -503,6 +500,7 @@ export function createBonsai(root: THREE.Object3D) {
 		lengths,
 		count,
 		materials,
+		outlineShoots,
 		clump,
 		grow,
 		setReach,
