@@ -1,9 +1,9 @@
 // Short pieces of preparation share a budget, then let the browser handle input and paint.
 export function startupYield(): Promise<void> {
 	const scheduler = (
-		globalThis as typeof globalThis & { scheduler?: { yield: () => Promise<void> } }
+		globalThis as typeof globalThis & { scheduler?: { yield?: () => Promise<void> } }
 	).scheduler;
-	return scheduler ? scheduler.yield() : new Promise((resolve) => setTimeout(resolve, 0));
+	return scheduler?.yield ? scheduler.yield() : new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 export async function runStartupSteps<T>(
