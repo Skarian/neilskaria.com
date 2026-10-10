@@ -110,13 +110,21 @@
 	const dialAt = (freq: number) => ((freq - FM_MIN) / (FM_MAX - FM_MIN)) * 100;
 	const station = $derived(player.station());
 	// What the radio's doing, in words: its station once it's really playing.
+	// The station's name (or what the radio's doing, off a station), and a line saying how it's coming in.
 	const radioTitle = $derived(
+		radio.status === 'off'
+			? 'Radio off'
+			: radio.status === 'static'
+				? 'Static…'
+				: (station?.name ?? '')
+	);
+	const radioLine = $derived(
 		{
-			off: 'Radio off',
-			static: 'Static…',
+			off: 'Switch on to listen',
+			static: 'Between stations',
 			tuning: 'Tuning…',
-			playing: station?.name ?? 'Static…',
-			offair: 'Off air',
+			playing: 'On air',
+			offair: 'Off air · try another',
 			blocked: 'Tap to listen'
 		}[radio.status]
 	);
@@ -403,7 +411,7 @@
 					>SCRAMBLE</button
 				>
 				<button
-					class="back reset"
+					class="back solve"
 					onclick={() => engine?.solveCube()}
 					disabled={cube.busy || !cube.scrambled}>SOLVE</button
 				>
@@ -432,12 +440,15 @@
 			out:pop={{ duration: 220 }}
 		>
 			<p class="ribbon radio-ribbon">RADIO</p>
-			<h2 class="station" class:waiting={radio.status === 'tuning'}>
-				{radioTitle}
-				{#if radioLink}
-					<a href={radioLink} target="_blank" rel="noreferrer" aria-label="Open the stream">↗</a>
-				{/if}
-			</h2>
+			<div class="station" data-status={radio.status}>
+				<h2>
+					{radioTitle}
+					{#if radioLink}
+						<a href={radioLink} target="_blank" rel="noreferrer" aria-label="Open the stream">↗</a>
+					{/if}
+				</h2>
+				<p class="status" aria-live="polite">{radioLine}</p>
+			</div>
 			<div class="dial" style:--at="{dialAt(radio.freq)}%">
 				<div class="scale" aria-hidden="true">
 					{#each [88, 92, 96, 100, 104, 108] as mhz (mhz)}
@@ -562,10 +573,17 @@
 			</div>
 			<div class="actions">
 				<button class="back" onclick={() => engine?.unfocus()}>◀ BACK</button>
-				<button class="back go water" onclick={() => engine?.waterBonsai()}>WATER</button>
+				<button class="back water" onclick={() => engine?.waterBonsai()}>WATER</button>
 				<button class="back reset" onclick={() => engine?.resetBonsai()}>↺ RESET</button>
 			</div>
 		</aside>
+	{/if}
+
+	{#if focused === 'portrait'}
+		<!-- The portrait is just looked at: no panel, only a way back. -->
+		<div class="alone" in:pop={{ delay: 500 }} out:pop={{ duration: 220 }}>
+			<button class="back" onclick={() => engine?.unfocus()}>◀ BACK</button>
+		</div>
 	{/if}
 
 	<div class="corner">
@@ -586,8 +604,10 @@
 			<span class="toggle" aria-hidden="true"><span></span></span>
 		</button>
 		{#if phase !== 'page'}
-			<button class="pill" onclick={() => engine?.skipToSite()}
-				>SKIP <span aria-hidden="true">▸</span></button
+			<button class="pill skip" onclick={() => engine?.skipToSite()}
+				>SKIP<svg class="arrow" viewBox="0 0 12 12" aria-hidden="true"
+					><path d="M3 1.5 10 6l-7 4.5z" /></svg
+				></button
 			>
 		{/if}
 	</div>
@@ -978,11 +998,74 @@
 		font-size: 0.65rem;
 	}
 
-	/* The station's name, with a small link out to its stream once it's playing. */
+	/* The station's name, with a small link out to its stream once it's playing, and a status line
+	   under it (always the same height, so nothing jumps as it changes). */
 	.station {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.15rem;
+	}
+
+	.station h2 {
 		display: flex;
 		align-items: baseline;
 		gap: 0.4rem;
+	}
+
+	.station .status {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		height: 1rem;
+		font-size: 0.62rem;
+		letter-spacing: 0.15em;
+		text-transform: uppercase;
+		opacity: 0.6;
+	}
+
+	.station[data-status='playing'] .status {
+		opacity: 0.85;
+	}
+
+	.station[data-status='playing'] .status::before {
+		content: '';
+		width: 0.45rem;
+		height: 0.45rem;
+		border-radius: 50%;
+		background: #e2574c;
+		box-shadow: 0 0 6px #e2574c;
+		animation: blink 2s ease-in-out infinite;
+	}
+
+	.station[data-status='tuning'] .status {
+		animation: blink 1s steps(2) infinite;
+	}
+
+	.station[data-status='offair'] h2 {
+		opacity: 0.4;
+		text-decoration: line-through;
+		text-decoration-thickness: 2px;
+	}
+
+	.station[data-status='offair'] .status {
+		color: #b8432f;
+		opacity: 1;
+	}
+
+	.station[data-status='blocked'] .status {
+		padding: 0 0.6rem;
+		border: 2px solid var(--ink);
+		border-radius: 999px;
+		background: #ffb070;
+		opacity: 1;
+		animation: nudge 1.2s ease-in-out infinite;
+	}
+
+	@keyframes nudge {
+		50% {
+			scale: 1.08;
+		}
 	}
 
 	.station a {
@@ -994,10 +1077,6 @@
 
 	.station a:hover {
 		opacity: 1;
-	}
-
-	.station.waiting {
-		animation: blink 1.2s steps(2) infinite;
 	}
 
 	/* Preset buttons, chunky like a car radio's. */
@@ -1110,6 +1189,10 @@
 
 	.actions .water {
 		background: #5ec8e8;
+	}
+
+	.actions .solve {
+		background: #5fa84a;
 	}
 
 	/* The growth meter: a track from trimmed to shaggy, a mark at neat, and a pointer for the tree. */
@@ -1427,6 +1510,20 @@
 		}
 	}
 
+	/* The Back button under the portrait's close-up. */
+	.alone {
+		--ink: #3a2618;
+		position: absolute;
+		left: 50%;
+		bottom: 1.5rem;
+		translate: -50% 0;
+	}
+
+	.alone .back {
+		padding: 0.6rem 1.6rem;
+		font-size: 0.8rem;
+	}
+
 	/* Top right: a sound switch (a music note and a toggle, like the radio's power) and SKIP. */
 	.corner {
 		position: absolute;
@@ -1473,6 +1570,17 @@
 	}
 
 	.note circle {
+		fill: currentColor;
+	}
+
+	/* The letter spacing already leaves a gap after SKIP: the arrow sits just past it. */
+	.pill.skip {
+		gap: 0.1rem;
+	}
+
+	.pill .arrow {
+		width: 0.8rem;
+		height: 0.8rem;
 		fill: currentColor;
 	}
 

@@ -10,6 +10,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { introAssets, lightmapScales } from './assets';
 import { bakedMaterial, loadBakedLighting, swayTime, type BakedLighting } from './baked-material';
 import { createBonsai } from './bonsai';
+import portraitUrl from './assets/portrait.png?url';
 import { BOOT_DURATION, drawBootScreen } from './boot-screen';
 import { drawClockLED, drawFrequencyLED } from './clock-led';
 import { FM_MIN } from '#lib/radio/stations.js';
@@ -26,7 +27,7 @@ import {
 import { createBootSound } from './sound';
 
 export type RoomMode = 'room' | 'booting' | 'site' | 'returning';
-export type Thing = 'sp' | 'cube' | 'clock' | 'lantern' | 'bonsai';
+export type Thing = 'sp' | 'cube' | 'clock' | 'lantern' | 'bonsai' | 'portrait';
 
 // The bonsai, as the panel shows it: its tufts' average length (0.3 trimmed, 1 neat, 1.6 shaggy).
 export type BonsaiState = { shagginess: number };
@@ -176,7 +177,14 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		dive: 0
 	};
 	// How highlighted each object is (0-1): it floats up a little and gets a thin white outline.
-	const hover: Record<Thing, number> = { sp: 0, cube: 0, clock: 0, lantern: 0, bonsai: 0 };
+	const hover: Record<Thing, number> = {
+		sp: 0,
+		cube: 0,
+		clock: 0,
+		lantern: 0,
+		bonsai: 0,
+		portrait: 0
+	};
 	// Which object the outline is drawn around, and how strongly.
 	const outline = { thing: null as Thing | null, opacity: 0 };
 	// Each object's meshes (except the console, which moves as one) and where they rest.
@@ -209,6 +217,14 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	const pointer = new THREE.Vector2();
 	const parallax = new THREE.Vector2();
 	const nearQuat = new THREE.Quaternion();
+	// Where the camera waits while the console floats and boots, before diving into its screen. The
+	// way in is framed close for each screen (introNear); the way back keeps the original framing.
+	const near = new THREE.Vector3().copy(CAMERA_NEAR);
+	const nearLook = new THREE.Vector3().copy(FLOAT);
+	const introNear = new THREE.Vector3();
+	const introLook = new THREE.Vector3();
+	const introQuat = new THREE.Quaternion();
+	const returnQuat = new THREE.Quaternion();
 	const finalPos = new THREE.Vector3();
 	const finalQuat = new THREE.Quaternion();
 	let mode: RoomMode = options.startIn;
@@ -326,6 +342,65 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		if (object.material instanceof THREE.MeshStandardMaterial) live.push(object.material);
 	});
 	screen.material = screenMaterial;
+
+	// A framed pixel-art portrait (Neil, his wife and their dog) hanging on the wall above the clock
+	// radio. The art is 180 x 240 pixels, twelve frames of sparkling water, packed into one column
+	// and played a frame at a time, kept pixel-sharp. Lit live, like the other things that move.
+	const PORTRAIT = { x: -1.3, y: 2.06, width: 1.6, wall: -2.9, depth: 0.09, border: 0.11 };
+	const PORTRAIT_FRAMES = 12;
+	const portraitArt = await new THREE.TextureLoader().loadAsync(portraitUrl);
+	const portrait = new THREE.Group();
+	portrait.name = 'Portrait';
+	{
+		const h = (PORTRAIT.width * 240) / 180;
+		portraitArt.colorSpace = THREE.SRGBColorSpace;
+		portraitArt.magFilter = THREE.NearestFilter;
+		portraitArt.anisotropy = renderer.capabilities.getMaxAnisotropy();
+		portraitArt.repeat.set(1, 1 / PORTRAIT_FRAMES);
+		const picture = new THREE.Mesh(
+			new THREE.PlaneGeometry(PORTRAIT.width, h),
+			new THREE.MeshStandardMaterial({ map: portraitArt, roughness: 0.55 })
+		);
+		picture.position.z = PORTRAIT.depth * 0.55;
+		portrait.add(picture);
+		// A simple dark-oak frame: four bevelled sides around the picture, standing proud of it.
+		const wood = new THREE.MeshStandardMaterial({ color: '#4a2e1c', roughness: 0.6 });
+		const b = PORTRAIT.border;
+		for (const [w, hh, x, y] of [
+			[PORTRAIT.width + b * 2, b, 0, h / 2 + b / 2],
+			[PORTRAIT.width + b * 2, b, 0, -h / 2 - b / 2],
+			[b, h, -PORTRAIT.width / 2 - b / 2, 0],
+			[b, h, PORTRAIT.width / 2 + b / 2, 0]
+		]) {
+			const side = new THREE.Mesh(new THREE.BoxGeometry(w, hh, PORTRAIT.depth), wood);
+			side.position.set(x, y, PORTRAIT.depth / 2);
+			portrait.add(side);
+		}
+		// Hung from a nail, so it leans out from the wall a touch at the bottom.
+		portrait.position.set(PORTRAIT.x, PORTRAIT.y, PORTRAIT.wall + 0.005);
+		portrait.rotation.x = THREE.MathUtils.degToRad(-2.5);
+		gltf.scene.add(portrait);
+		// Lit as the wall it hangs on: each point takes the wall's baked light from just behind it, so
+		// the picture and frame match the wall exactly, and tint and dim with the lantern like it.
+		const wall = gltf.scene.getObjectByName('WallRight') as THREE.Mesh;
+		const toWall = new THREE.Raycaster();
+		const back = new THREE.Vector3(0, 0, -1);
+		const at = new THREE.Vector3();
+		portrait.updateMatrixWorld(true);
+		portrait.traverse((o) => {
+			if (!(o instanceof THREE.Mesh)) return;
+			const position = o.geometry.attributes.position;
+			const uv1 = new Float32Array(position.count * 2);
+			for (let i = 0; i < position.count; i++) {
+				at.fromBufferAttribute(position, i).applyMatrix4(o.matrixWorld);
+				toWall.set(at.setZ(PORTRAIT.wall + 1), back);
+				const hit = toWall.intersectObject(wall, false)[0];
+				if (hit?.uv1) uv1.set([hit.uv1.x, hit.uv1.y], i * 2);
+			}
+			o.geometry.setAttribute('uv1', new THREE.BufferAttribute(uv1, 2));
+			o.material = bakedMaterial(o.material as THREE.MeshStandardMaterial, lighting.wall);
+		});
+	}
 
 	// The Rubik's cube is rebuilt as a working puzzle where the modelled one sits, from its materials.
 	const modelled: THREE.Mesh[] = [];
@@ -650,7 +725,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 
 	camera.position.copy(CAMERA_NEAR);
 	camera.lookAt(FLOAT);
-	nearQuat.copy(camera.quaternion);
+	returnQuat.copy(camera.quaternion);
+	nearQuat.copy(returnQuat);
 	camera.position.copy(view.eye);
 	camera.lookAt(view.target);
 	computeFinalCamera();
@@ -733,6 +809,41 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		finalPos.copy(center).addScaledVector(normal, distance);
 		finalQuat.setFromRotationMatrix(new THREE.Matrix4().lookAt(finalPos, center, up));
 
+		// The way in: from the same direction as the original framing, but close enough that the open
+		// console fills a good share of the screen (most of its width on upright screens), aimed at it.
+		const spBox = new THREE.Box3().setFromObject(sp);
+		spBox.getCenter(introLook);
+		const corners = [0, 1, 2, 3, 4, 5, 6, 7].map(
+			(k) =>
+				new THREE.Vector3(
+					k & 1 ? spBox.max.x : spBox.min.x,
+					k & 2 ? spBox.max.y : spBox.min.y,
+					k & 4 ? spBox.max.z : spBox.min.z
+				)
+		);
+		const dir = CAMERA_NEAR.clone().sub(FLOAT).normalize();
+		const upright = camera.aspect <= 1;
+		const share = upright ? { w: 0.92, h: 0.7 } : { w: 0.75, h: 0.78 };
+		const probe = camera.clone();
+		let d = CAMERA_NEAR.distanceTo(FLOAT);
+		for (let round = 0; round < 5; round++) {
+			probe.position.copy(introLook).addScaledVector(dir, d);
+			probe.lookAt(introLook);
+			probe.updateMatrixWorld();
+			let w = 0;
+			let h = 0;
+			for (const corner of corners) {
+				const p = corner.clone().project(probe);
+				w = Math.max(w, Math.abs(p.x));
+				h = Math.max(h, Math.abs(p.y));
+			}
+			d *= Math.max(w / share.w, h / share.h);
+		}
+		introNear.copy(introLook).addScaledVector(dir, d);
+		probe.position.copy(introNear);
+		probe.lookAt(introLook);
+		introQuat.copy(probe.quaternion);
+
 		Object.assign(s, saved);
 		hover.sp = savedHover;
 	}
@@ -781,6 +892,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		cube: CUBE_FROM,
 		// From a little above, so the scissors can reach the tops of the pads.
 		bonsai: new THREE.Vector3(0.15, 0.4, 1),
+		// Straight on, as you'd look at a picture.
+		portrait: new THREE.Vector3(0, 0.03, 1),
 		// From the front and a little right, square on to the dial.
 		clock: new THREE.Vector3(0.2, 0.32, 1)
 	};
@@ -818,21 +931,33 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		// The cube is small: further back, so there's room to turn it over.
 		// The cube is small, so further back to leave room to turn it over; the clock radio is wide, so
 		// closer in, to read its dial.
-		const portrait = camera.aspect <= 1;
+		const upright = camera.aspect <= 1;
 		// How much of the space it's given each object fills (the cube less, to leave room to turn it).
 		const fill =
-			(portrait
-				? { cube: innerWidth <= 640 ? 0.55 : 0.4, clock: 0.9, bonsai: 0.97, lantern: 0.8 }
-				: { cube: 0.55, clock: 0.9, bonsai: 0.8, lantern: 0.85 })[thing as string] ?? 0.8;
+			(upright
+				? {
+						cube: innerWidth <= 640 ? 0.55 : 0.4,
+						clock: 0.9,
+						bonsai: 0.97,
+						lantern: 0.8,
+						portrait: 0.92
+					}
+				: { cube: 0.55, clock: 0.9, bonsai: 0.8, lantern: 0.85, portrait: 0.88 })[
+				thing as string
+			] ?? 0.8;
+		// The portrait has no panel: it's centred on the whole screen, above its Back button.
+		const alone = thing === 'portrait';
 		let d = size * 2;
 		const eye = centre.clone().addScaledVector(dir, d);
 		const target = centre.clone();
 		// Then measure where the object actually lands on screen, and pan until it's centred in the
 		// space the panel leaves: above it on phones (below the buttons at the top), left of it on wider
 		// screens. A few rounds settle it.
-		const want = portrait
-			? new THREE.Vector2(0, 1 - (0.07 + freeAbove))
-			: new THREE.Vector2(freeLeft - 1, -0.04);
+		const want = alone
+			? new THREE.Vector2(0, 0.06)
+			: upright
+				? new THREE.Vector2(0, 1 - (0.07 + freeAbove))
+				: new THREE.Vector2(freeLeft - 1, -0.04);
 		const probe = camera.clone();
 		// Points across the object's actual shape (a box's corners would overstate it).
 		const corners: THREE.Vector3[] = [];
@@ -862,9 +987,11 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		}
 		const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
 		// The space, in screen units (-1 to 1 across and up).
-		const room = portrait
-			? new THREE.Vector2(2, 2 * (freeAbove - 0.07))
-			: new THREE.Vector2(2 * freeLeft, 1.9);
+		const room = alone
+			? new THREE.Vector2(2, 1.62)
+			: upright
+				? new THREE.Vector2(2, 2 * (freeAbove - 0.07))
+				: new THREE.Vector2(2 * freeLeft, 1.9);
 		for (let round = 0; round < 6; round++) {
 			probe.position.copy(eye);
 			probe.lookAt(target);
@@ -955,6 +1082,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		lastFrame = t;
 		swayTime.value = t;
 		pose(t);
+		// The portrait's water sparkles: a frame every tenth of a second (frame 0 is at the top).
+		portraitArt.offset.y = 1 - ((Math.floor(t * 10) % PORTRAIT_FRAMES) + 1) / PORTRAIT_FRAMES;
 		if (!turning && Math.abs(spin) > 0.0005) {
 			turnTree(spin);
 			spin *= Math.pow(0.04, dt);
@@ -973,12 +1102,12 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		const calm = (1 - s.drift) * (1 - s.dive);
 		parallax.lerp(pointer, 0.05);
 		if (s.dive > 0) {
-			camera.position.lerpVectors(CAMERA_NEAR, finalPos, s.dive);
+			camera.position.lerpVectors(near, finalPos, s.dive);
 			camera.quaternion.slerpQuaternions(nearQuat, finalQuat, s.dive);
 		} else {
 			const f = focusBlend.value;
-			const look = new THREE.Vector3().lerpVectors(view.target, FLOAT, s.drift);
-			camera.position.lerpVectors(view.eye, CAMERA_NEAR, s.drift);
+			const look = new THREE.Vector3().lerpVectors(view.target, nearLook, s.drift);
+			camera.position.lerpVectors(view.eye, near, s.drift);
 			camera.position.x += parallax.x * 0.35 * calm * (1 - f * (1 - focusSway));
 			camera.position.y += parallax.y * 0.2 * calm * (1 - f * (1 - focusSway));
 			if (f > 0) {
@@ -1068,6 +1197,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			if (/^Clock/.test(o.name)) return 'clock';
 			if (/^(Kumiko|LanternPaper)/.test(o.name)) return 'lantern';
 			if (/^Bonsai/.test(o.name)) return 'bonsai';
+			if (o.name === 'Portrait') return 'portrait';
 		}
 		return null;
 	}
@@ -1156,6 +1286,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 				progress: number;
 		  };
 	let cubeDrag: CubeDrag | null = null;
+	let whooshedAt = 0;
 
 	function emitCube() {
 		onCube({ ...cube });
@@ -1242,6 +1373,13 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			rubiks.orbit.quaternion.premultiply(frame.clone().invert().multiply(turn).multiply(frame));
 			cubeDrag.x = event.clientX;
 			cubeDrag.y = event.clientY;
+			// A brisk turn whooshes (not every little nudge, and not on top of the last one).
+			const speed = Math.min(1, Math.hypot(dx, dy) / 40);
+			const now = performance.now();
+			if (speed > 0.3 && now - whooshedAt > 380) {
+				whooshedAt = now;
+				sound.whoosh(speed);
+			}
 			return;
 		}
 		if (cubeDrag.kind === 'face') {
@@ -1389,6 +1527,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			ease: 'bounce.out',
 			overwrite: true
 		});
+		// It touches down about a third of the way into the bounce.
+		gsap.delayedCall(0.48, () => sound.cubeLand());
 	}
 
 	// The clock radio mirrors the site's radio: the power switch slides, the dial lights, and the
@@ -1432,8 +1572,18 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		return false;
 	}
 
-	function turnTree(by: number) {
+	// The turntable clicks round a notch at a time: every 12 degrees.
+	const NOTCH = THREE.MathUtils.degToRad(12);
+	let notchesFrom = 0;
+	function turnTree(by: number, byHand = false) {
+		const before = Math.floor((bonsai.turntable.rotation.y - notchesFrom) / NOTCH);
 		bonsai.turntable.rotation.y += by;
+		const after = Math.floor((bonsai.turntable.rotation.y - notchesFrom) / NOTCH);
+		if (before !== after && focused === 'bonsai') {
+			sound.ratchet(Math.min(1, 0.45 + Math.abs(by) * 6));
+			// A tick you can feel, on phones that can (Android; iPhones' browsers can't vibrate).
+			if (byHand) navigator.vibrate?.(8);
+		}
 		bonsai.turntable.updateMatrixWorld();
 		const turned = new THREE.Matrix4().multiplyMatrices(
 			bonsai.turntable.matrixWorld,
@@ -1715,8 +1865,17 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	// resting pose (the SP closed on the table).
 	const RESTING = { ...s };
 
+	// Which framing the console is seen in while it floats: close on the way in, the original on the
+	// way back.
+	function useNear(way: 'in' | 'back') {
+		near.copy(way === 'in' ? introNear : CAMERA_NEAR);
+		nearLook.copy(way === 'in' ? introLook : FLOAT);
+		nearQuat.copy(way === 'in' ? introQuat : returnQuat);
+	}
+
 	function timelineFor() {
 		Object.assign(s, RESTING);
+		useNear('in');
 		const tl = gsap.timeline({ paused: true });
 		tl.to(s, { drift: 1, duration: 2.8, ease: 'power1.inOut' }, 0)
 			.to(s, { rise: 1, duration: 1.3, ease: 'back.out(1.6)' }, 0.3)
@@ -1786,6 +1945,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		// Never wait on audio: the animation starts right away, sound joins in when the browser allows it.
 		void sound.resume();
 		timeline?.kill();
+		useNear('back');
 		Object.assign(s, {
 			drift: 1,
 			rise: 1,
@@ -1820,6 +1980,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			.to(s, { open: 0, duration: 0.6, ease: 'power2.in' }, 2.1)
 			.to(s, { spin: 0, duration: 0.9, ease: 'power2.inOut' }, 2.0)
 			.to(s, { rise: 0, duration: 0.7, ease: 'bounce.out' }, 2.45)
+			.call(() => sound.consoleLand(), [], 2.7)
 			.to(s, { drift: 0, duration: 1.4, ease: 'power2.inOut' }, 1.75);
 		timeline = tl;
 		setMode('returning');
@@ -1878,7 +2039,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		turnBonsai: (by) => {
 			if (focused !== 'bonsai') return;
 			spin = 0;
-			turnTree(by);
+			turnTree(by, true);
 		},
 		releaseBonsai: (by) => {
 			if (focused === 'bonsai') spin = by;

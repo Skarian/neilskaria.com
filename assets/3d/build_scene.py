@@ -289,10 +289,15 @@ sp = gba_sp.build()['sp']
 
 TOP = -gba_sp.BASE_H * gba_sp.U - 0.0005
 FLOOR = TOP - 7.0
-groups = {'props': [], 'bed': [], 'room': [], 'foliage': [], 'wall': [], 'plant': []}
+groups = {'props': [], 'bed': [], 'room': [], 'wall': [], 'plant': []}
 # Lightmap size per group (others use ATLAS).
 GROUP_SIZE = {'wall': 2048, 'plant': 512}
 bake_only = []
+
+
+def link_object(obj):
+	scene.collection.objects.link(obj)
+	return obj
 
 
 def add(group, obj):
@@ -315,8 +320,30 @@ nightstand = add('props', place(props.mcm_nightstand(oak), (0, 0.3, FLOOR)))
 props_baked, foliage, props_unbaked = props.build(lambda obj, size: bake_albedo(obj, size, OUT_DIR), TOP, woodgrain)
 for obj in props_baked:
 	add('props', obj)
+# The bonsai's foliage is grown on the site (it's trimmed and grows back), so the modelled foliage
+# goes. In the bake a stand-in takes its place, made from the site's own tree as it looks neat
+# (bonsai-foliage.json, exported from the browser): a little cluster at each node of every shoot, and
+# its twigs. It casts the tree's shadow and blocks the lantern's light, but isn't exported.
 for obj in foliage:
-	add('foliage', obj)
+	bpy.data.objects.remove(obj)
+tree = json.loads((Path(__file__).parent / 'bonsai-foliage.json').read_text())
+bm = bmesh.new()
+for shoot in tree['shoots']:
+	for p in shoot[1:]:
+		bmesh.ops.create_icosphere(bm, subdivisions=1, radius=0.034, matrix=Matrix.Translation(p))
+mesh = bpy.data.meshes.new('BonsaiShadow')
+bm.to_mesh(mesh)
+bm.free()
+shadow = finish(link_object(bpy.data.objects.new('BonsaiShadow', mesh)), 'BonsaiShadow', material('BonsaiShadow', (0.06, 0.16, 0.07), roughness=0.8))
+bm = bmesh.new()
+t = tree['twigs']
+for i in range(0, len(t), 9):
+	bm.faces.new([bm.verts.new(t[i + k * 3 : i + k * 3 + 3]) for k in range(3)])
+mesh = bpy.data.meshes.new('BonsaiTwigShadow')
+bm.to_mesh(mesh)
+bm.free()
+twigs = finish(link_object(bpy.data.objects.new('BonsaiTwigShadow', mesh)), 'BonsaiTwigShadow', material('BonsaiTwigShadow', (0.06, 0.035, 0.02), roughness=0.9))
+bake_only += [shadow, twigs]
 
 # A kumiko lantern stands where a lamp would; its bulb is the warm light in the bake.
 lamp_x, lamp_y = 1.35, 1.3
@@ -455,6 +482,43 @@ for name, x0, x1, z0, z1 in [
 ]:
 	add('wall' if name == 'WallRight' else 'room', box(name, (x1 - x0, 0.5, z1 - z0), ((x0 + x1) / 2, WALL_Y + 0.25, (z0 + z1) / 2), wall_mat))
 add('room', box('SideWall', (0.5, 50, 32), (-35.25, -18, FLOOR + 16), wall_mat))
+
+# A framed pixel-art portrait hangs on the wall above the clock radio, leaning out a touch at the
+# bottom. It's baked with the wall (the site draws the animated picture onto it).
+PORTRAIT_X, PORTRAIT_Z, PORTRAIT_W, PORTRAIT_DEPTH, PORTRAIT_BORDER = -1.3, 2.06, 1.6, 0.09, 0.11
+PORTRAIT_H = PORTRAIT_W * 240 / 180
+hang = Matrix.Translation((PORTRAIT_X, WALL_Y - 0.005, PORTRAIT_Z)) @ Matrix.Rotation(math.radians(-2.5), 4, 'X')
+frame_mat = material('PortraitFrame', (0.069, 0.027, 0.012), roughness=0.6)
+sides = []
+for w, h, x, z in [
+	(PORTRAIT_W + PORTRAIT_BORDER * 2, PORTRAIT_BORDER, 0, PORTRAIT_H / 2 + PORTRAIT_BORDER / 2),
+	(PORTRAIT_W + PORTRAIT_BORDER * 2, PORTRAIT_BORDER, 0, -PORTRAIT_H / 2 - PORTRAIT_BORDER / 2),
+	(PORTRAIT_BORDER, PORTRAIT_H, -PORTRAIT_W / 2 - PORTRAIT_BORDER / 2, 0),
+	(PORTRAIT_BORDER, PORTRAIT_H, PORTRAIT_W / 2 + PORTRAIT_BORDER / 2, 0),
+]:
+	side = box('PortraitSide', (w, PORTRAIT_DEPTH, h), (x, -PORTRAIT_DEPTH / 2, z), frame_mat)
+	side.data.transform(hang @ Matrix.Translation(side.location))
+	side.location = (0, 0, 0)
+	sides.append(side)
+bpy.ops.object.select_all(action='DESELECT')
+for side in sides:
+	side.select_set(True)
+bpy.context.view_layer.objects.active = sides[0]
+bpy.ops.object.join()
+frame = sides[0]
+frame.name = frame.data.name = 'PortraitFrame'
+add('wall', frame)
+# The picture: a plane with its own UVs, facing out from the wall.
+bm = bmesh.new()
+uv = bm.loops.layers.uv.new('UVMap')
+hw, hh, y = PORTRAIT_W / 2, PORTRAIT_H / 2, -PORTRAIT_DEPTH * 0.55
+face = bm.faces.new([bm.verts.new(hang @ Vector(c)) for c in [(-hw, y, -hh), (hw, y, -hh), (hw, y, hh), (-hw, y, hh)]])
+for loop, (u, v) in zip(face.loops, [(0, 0), (1, 0), (1, 1), (0, 1)]):
+	loop[uv].uv = (u, v)
+mesh = bpy.data.meshes.new('PortraitPicture')
+bm.to_mesh(mesh)
+bm.free()
+add('wall', finish(link_object(bpy.data.objects.new('PortraitPicture', mesh)), 'PortraitPicture', material('PortraitPicture', (0.25, 0.33, 0.2), roughness=0.55)))
 
 wx, wz = (WIN[0] + WIN[1]) / 2, (WIN[2] + WIN[3]) / 2
 ww, wh = WIN[1] - WIN[0], WIN[3] - WIN[2]

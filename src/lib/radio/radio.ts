@@ -7,7 +7,8 @@ import { GROVE, reception, STATIONS } from './stations';
 
 type Play = ReturnType<typeof players>;
 
-// Grove, in 3/4: twelve sixteenth-note steps to a bar, eight bars round.
+// Grove, in 3/4: twelve sixteenth-note steps to a bar, sixteen bars round. It's mixed to sit about as
+// loud as the streams (which YouTube evens out to a standard loudness); static sits well under both.
 const GROVE_BPM = 84;
 // Each bar's melody, a note (MIDI) or 0 per beat; a note followed by 0s is held.
 const MELODY = [
@@ -58,14 +59,14 @@ function grove(play: Play, step: number, time: number, length: number) {
 		if (note) {
 			let held = 1;
 			while (beat + held < 3 && MELODY[bar][beat + held] === 0) held++;
-			play.ocarina(time, note, length * 4 * held, 0.09);
+			play.ocarina(time, note, length * 4 * held, 0.18);
 		}
 	}
 	// The harp: the root on the downbeat, then the chord rolled upwards.
-	if (s === 0) play.harp(time, chord[0] - 12, 0.08);
+	if (s === 0) play.harp(time, chord[0] - 12, 0.16);
 	if (s === 4 || s === 8)
-		for (const [k, n] of chord.entries()) play.harp(time + k * 0.04, n + 12, 0.035);
-	if (s === 0 && bar % 2 === 0) for (const n of chord) play.pad(time, n, length * 24, 0.012, 1.2);
+		for (const [k, n] of chord.entries()) play.harp(time + k * 0.04, n + 12, 0.07);
+	if (s === 0 && bar % 2 === 0) for (const n of chord) play.pad(time, n, length * 24, 0.024, 1.2);
 }
 
 const midi = (n: number) => 440 * Math.pow(2, (n - 69) / 12);
@@ -291,7 +292,7 @@ export function createRadio(ctx: AudioContext, out: AudioNode) {
 		// Static, fading out as any station (streamed or local) comes in.
 		const clearest = Math.max(...STATIONS.map((station) => reception(freq, station.freq)));
 		// (And softly while a stream's still coming in, or sitting out an ad.)
-		const hiss = Math.max(0.01 + 0.11 * Math.pow(1 - clearest, 1.5), waiting ? 0.05 : 0);
+		const hiss = 0.75 * Math.max(0.01 + 0.11 * Math.pow(1 - clearest, 1.5), waiting ? 0.05 : 0);
 		hissGain.gain.setTargetAtTime(hiss, now, 0.08);
 		volume.gain.setTargetAtTime(on ? level : 0, now, on ? 0.08 : 0.05);
 		if (on && !timer) {
@@ -311,6 +312,8 @@ export function createRadio(ctx: AudioContext, out: AudioNode) {
 			level = state.volume;
 			update();
 		},
+		// What's coming out right now (for checking by hand).
+		levels: () => ({ hiss: hissGain.gain.value, volume: volume.gain.value }),
 		dispose() {
 			clearInterval(timer);
 			hiss.stop();

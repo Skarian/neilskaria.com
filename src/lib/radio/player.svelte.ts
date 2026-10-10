@@ -25,7 +25,9 @@ export const radio = $state({
 	volume: 0.7,
 	// Everything silenced, from the room's sound switch.
 	muted: false,
-	status: 'off' as RadioStatus
+	status: 'off' as RadioStatus,
+	// Where a sweep across the dial is heading (the stations it passes on the way don't count).
+	target: null as number | null
 });
 
 // Which stream each station is playing right now (by frequency), as the server last said.
@@ -75,7 +77,7 @@ function updateStatus() {
 }
 
 function setStatus() {
-	const station = stationAt(radio.freq);
+	const station = stationAt(radio.target ?? radio.freq);
 	radio.status = !radio.on
 		? 'off'
 		: !station
@@ -141,13 +143,17 @@ function applyLocal() {
 		if (!radio.on) return;
 		const ctx = new AudioContext({ latencyHint: 'playback' });
 		local = { ctx, synth: createRadio(ctx, ctx.destination) };
+		if (import.meta.env.DEV) Object.assign(window, { __local: local });
 	}
 	if (radio.on) void local.ctx.resume();
+	// In a background tab on a streamed station, everything local goes quiet: phones pause the
+	// stream there, and the faint static under it would otherwise carry on by itself.
+	const away = document.hidden && stationAt(radio.freq)?.kind === 'stream';
 	local.synth.set({
 		on: radio.on,
 		freq: radio.freq,
-		volume: radio.muted ? 0 : radio.volume,
-		waiting: radio.status === 'tuning'
+		volume: radio.muted || away ? 0 : radio.volume,
+		waiting: radio.status === 'tuning' && !document.hidden
 	});
 }
 
@@ -183,15 +189,22 @@ function apply(now = false) {
 	updateStatus();
 }
 
+// Into or out of a background tab: the tuning hiss stops or starts again.
+if (typeof document !== 'undefined')
+	document.addEventListener('visibilitychange', () => {
+		if (local) applyLocal();
+	});
 // The browser held a stream back until there's a tap: the next tap anywhere starts it.
 if (typeof window !== 'undefined')
 	addEventListener('pointerdown', () => {
 		if (radio.status === 'blocked') applyStream(true);
 	});
 
+if (import.meta.env.DEV && typeof window !== 'undefined') Object.assign(window, { __radio: radio });
+
 export const player = {
 	load,
-	station: () => stationAt(radio.freq),
+	station: () => stationAt(radio.target ?? radio.freq),
 	// Where to find the stream the radio's on, to credit it.
 	link: () => {
 		const id = streamOf(stationAt(radio.freq));
@@ -206,6 +219,7 @@ export const player = {
 	// Straight to a frequency, as the dial is dragged.
 	tune(freq: number) {
 		cancelAnimationFrame(sweep);
+		radio.target = null;
 		radio.freq = clamp(freq, FM_MIN, FM_MAX);
 		apply();
 		save();
@@ -215,6 +229,7 @@ export const player = {
 		cancelAnimationFrame(sweep);
 		const from = radio.freq;
 		const to = clamp(freq, FM_MIN, FM_MAX);
+		radio.target = to;
 		const duration = (0.3 + Math.abs(to - from) * 0.05) * 1000;
 		const start = performance.now();
 		const step = (now: number) => {
@@ -226,6 +241,7 @@ export const player = {
 				updateStatus();
 				sweep = requestAnimationFrame(step);
 			} else {
+				radio.target = null;
 				apply(true);
 				save();
 			}

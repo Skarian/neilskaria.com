@@ -10,6 +10,8 @@ type YTPlayer = {
 	stopVideo(): void;
 	setVolume(volume: number): void;
 	getDuration(): number;
+	getCurrentTime(): number;
+	getPlayerState(): number;
 	mute(): void;
 	unMute(): void;
 	destroy(): void;
@@ -68,21 +70,55 @@ export function createStreamPlayer(onStatus: (status: StreamStatus, id: string |
 		else p.unMute();
 	}
 
-	// A live stream's duration runs to hours; while an ad plays, the player reports the ad's instead
-	// (seconds). That's the tell: mute until it's back.
-	async function watchForAds() {
+	// Once a second while a stream should be playing:
+	// - A live stream's duration runs to hours; while an ad plays, the player reports the ad's instead
+	//   (seconds). That's the tell: mute until it's back.
+	// - A stream that's stopped moving for a while has stalled: it's reloaded, at the live edge.
+	const STALL = 15;
+	let lastTime = -1;
+	let still = 0;
+	async function watch() {
 		clearInterval(watching);
 		const p = await ensure();
+		lastTime = -1;
+		still = 0;
 		watching = setInterval(() => {
 			if (!wanted) return clearInterval(watching);
 			const duration = p.getDuration();
 			const ad = duration > 0 && duration < 180;
-			if (ad === inAd) return;
-			inAd = ad;
-			applyVolume(p);
-			onStatus(ad ? 'ad' : 'playing', current);
+			if (ad !== inAd) {
+				inAd = ad;
+				applyVolume(p);
+				onStatus(ad ? 'ad' : 'playing', current);
+			}
+			// In a background tab the browser throttles the player; coming back picks it up instead.
+			if (document.hidden) {
+				still = 0;
+				return;
+			}
+			const time = p.getCurrentTime();
+			still = Math.abs(time - lastTime) < 0.25 ? still + 1 : 0;
+			lastTime = time;
+			if (still >= STALL && current) {
+				still = 0;
+				onStatus('loading', current);
+				p.loadVideoById(current);
+				p.playVideo();
+			}
 		}, 1000);
 	}
+
+	// Back on the page: a stream the browser paused in the background picks up again, live.
+	if (typeof document !== 'undefined')
+		document.addEventListener('visibilitychange', async () => {
+			if (document.hidden || !wanted || !current || !player) return;
+			const p = await player;
+			if (p.getPlayerState() !== 1) {
+				onStatus('loading', current);
+				p.loadVideoById(current);
+				p.playVideo();
+			}
+		});
 
 	function ensure() {
 		player ??= loadApi().then(
@@ -118,7 +154,10 @@ export function createStreamPlayer(onStatus: (status: StreamStatus, id: string |
 							origin: location.origin
 						},
 						events: {
-							onReady: (event) => resolve(event.target),
+							onReady: (event) => {
+								if (import.meta.env.DEV) Object.assign(window, { __stream: event.target });
+								resolve(event.target);
+							},
 							onStateChange: (event) => {
 								// 1 playing, 3 buffering, 2 paused, 0 ended, 5 cued, -1 unstarted.
 								if (event.data === 1) onStatus(inAd ? 'ad' : 'playing', current);
@@ -155,7 +194,7 @@ export function createStreamPlayer(onStatus: (status: StreamStatus, id: string |
 			applyVolume(p);
 			p.loadVideoById(id);
 			p.playVideo();
-			void watchForAds();
+			void watch();
 		},
 		async stop() {
 			wanted = false;

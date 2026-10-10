@@ -14,6 +14,48 @@ export async function createBootSound(chimeUrl: string, muted = false) {
 		chime = null;
 	}
 
+	// A short burst of filtered noise, fading fast: the body of clicks, clacks and thunks.
+	function burst(
+		at: number,
+		{ len = 0.05, type = 'bandpass' as BiquadFilterType, freq = 1000, q = 1, gain = 0.5, decay = 4 }
+	) {
+		const source = ctx.createBufferSource();
+		source.buffer = noiseBuffer(ctx, len);
+		const data = source.buffer.getChannelData(0);
+		for (let i = 0; i < data.length; i++) data[i] *= Math.pow(1 - i / data.length, decay);
+		const filter = ctx.createBiquadFilter();
+		filter.type = type;
+		filter.frequency.value = freq;
+		filter.Q.value = q;
+		const g = ctx.createGain();
+		g.gain.value = gain;
+		source.connect(filter).connect(g).connect(master);
+		source.start(at);
+	}
+
+	// A short falling tone: the weight under a thunk.
+	function tone(
+		at: number,
+		{ from = 200, to = 100, len = 0.1, gain = 0.4, type = 'sine' as OscillatorType }
+	) {
+		const osc = ctx.createOscillator();
+		osc.type = type;
+		osc.frequency.setValueAtTime(from, at);
+		osc.frequency.exponentialRampToValueAtTime(to, at + len);
+		const g = ctx.createGain();
+		g.gain.setValueAtTime(gain, at);
+		g.gain.exponentialRampToValueAtTime(0.0001, at + len);
+		osc.connect(g).connect(master);
+		osc.start(at);
+		osc.stop(at + len + 0.02);
+	}
+
+	// Wood knocked on wood.
+	function tok(at: number, strength: number) {
+		burst(at, { len: 0.06, freq: 950, q: 2.2, gain: 0.7 * strength, decay: 6 });
+		tone(at, { from: 260, to: 150, len: 0.09, gain: 0.35 * strength });
+	}
+
 	return {
 		hasChime: chime !== null,
 		resume: () => ctx.resume(),
@@ -86,6 +128,54 @@ export async function createBootSound(chimeUrl: string, muted = false) {
 				source.start(at);
 			}
 		},
+		// The cube set down on the wood: a "tok", then two smaller ones as it bounces.
+		cubeLand() {
+			const t = ctx.currentTime + 0.01;
+			tok(t, 1);
+			tok(t + 0.19, 0.35);
+			tok(t + 0.3, 0.12);
+		},
+		// The cube turned over in the hand: a faint whoosh, louder (and a touch shorter) the faster.
+		whoosh(speed: number) {
+			const t = ctx.currentTime + 0.01;
+			const len = 0.5 - 0.15 * speed;
+			const source = ctx.createBufferSource();
+			source.buffer = noiseBuffer(ctx, len);
+			const filter = ctx.createBiquadFilter();
+			filter.type = 'bandpass';
+			filter.Q.value = 0.9;
+			filter.frequency.setValueAtTime(350, t);
+			filter.frequency.exponentialRampToValueAtTime(900 + 900 * speed, t + len * 0.45);
+			filter.frequency.exponentialRampToValueAtTime(500, t + len);
+			const gain = ctx.createGain();
+			gain.gain.setValueAtTime(0.0001, t);
+			gain.gain.exponentialRampToValueAtTime(0.25 * speed, t + len * 0.4);
+			gain.gain.exponentialRampToValueAtTime(0.0001, t + len);
+			source.connect(filter).connect(gain).connect(master);
+			source.start(t);
+		},
+		// One notch of the bonsai's turntable going round.
+		ratchet(strength = 1) {
+			const t = ctx.currentTime + 0.005;
+			burst(t, {
+				len: 0.012,
+				type: 'highpass',
+				freq: 2600,
+				q: 0.7,
+				gain: 0.35 * strength,
+				decay: 3
+			});
+			tone(t, { from: 2300, to: 1900, len: 0.012, gain: 0.06 * strength, type: 'triangle' });
+		},
+		// The console landing back on the table: a soft plastic thunk, and its little bounce.
+		consoleLand() {
+			const t = ctx.currentTime + 0.01;
+			tone(t, { from: 150, to: 70, len: 0.14, gain: 0.5 });
+			burst(t, { len: 0.07, type: 'lowpass', freq: 1300, q: 0.8, gain: 0.55, decay: 5 });
+			burst(t + 0.005, { len: 0.02, freq: 2400, q: 3, gain: 0.12, decay: 4 });
+			tone(t + 0.21, { from: 130, to: 80, len: 0.08, gain: 0.18 });
+			burst(t + 0.21, { len: 0.04, type: 'lowpass', freq: 1200, gain: 0.18, decay: 5 });
+		},
 		// A slash through the bonsai: a quick swish, sweeping down, with the clack of the blades.
 		slash(strength = 1) {
 			const length = Math.floor(ctx.sampleRate * 0.14);
@@ -133,6 +223,13 @@ export async function createBootSound(chimeUrl: string, muted = false) {
 		},
 		close: () => ctx.close()
 	};
+}
+
+function noiseBuffer(ctx: AudioContext, seconds: number) {
+	const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * seconds), ctx.sampleRate);
+	const data = buffer.getChannelData(0);
+	for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+	return buffer;
 }
 
 function bell(

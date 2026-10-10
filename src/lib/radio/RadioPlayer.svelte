@@ -6,12 +6,13 @@
 	// music carries on from one to the other. Off until it's switched on.
 
 	const station = $derived(player.station());
+	// The station's name while on one (blinking while it comes in), or what the radio's doing.
 	const label = $derived(
 		{
 			off: 'Radio off',
 			static: 'Static…',
-			tuning: 'Tuning…',
-			playing: station?.name ?? 'Static…',
+			tuning: station?.name ?? 'Tuning…',
+			playing: station?.name ?? '',
 			offair: 'Off air',
 			blocked: 'Tap to listen'
 		}[radio.status]
@@ -34,7 +35,7 @@
 	<button class="skip" onclick={() => player.skip(-1)} aria-label="Previous station">
 		<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3 2 8l6 5zM15 3 9 8l6 5z" /></svg>
 	</button>
-	<p class="readout" class:on={radio.on} aria-live="polite">
+	<p class="readout" class:on={radio.on} data-status={radio.status} aria-live="polite">
 		<span class="freq">{radio.freq.toFixed(1)}</span>
 		<span class="name">{label}</span>
 		{#if link}
@@ -151,6 +152,23 @@
 	.readout.on {
 		color: #ff3b2a;
 		text-shadow: 0 0 6px rgb(255 59 42 / 0.6);
+	}
+
+	.readout[data-status='tuning'] .name,
+	.readout[data-status='blocked'] .name {
+		animation: blink 1s steps(2) infinite;
+	}
+
+	.readout[data-status='offair'] .name,
+	.readout[data-status='static'] .name {
+		color: #a8402f;
+		text-shadow: none;
+	}
+
+	@keyframes blink {
+		50% {
+			opacity: 0.35;
+		}
 	}
 
 	.freq {
