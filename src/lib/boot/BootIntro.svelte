@@ -30,16 +30,17 @@
 	// Where the visitor is in this tab ('room' or 'page'), so a reload puts them back there.
 	const PLACE_KEY = 'room-place';
 	// Runs before the page is painted, so the room's loading screen shows straight away (on a first
-	// visit, or reloading while in the room) and a returning visit never flashes it.
+	// visit, or reloading while in the room) and a returning visit never flashes it. Until Svelte
+	// takes over, SKIP and Escape leave a note on the document as well as saving the visit.
 	const headScript =
-		`<script>try{if((localStorage.getItem('${SEEN_KEY}')!=='1'||sessionStorage.getItem('${PLACE_KEY}')==='room')&&!matchMedia('(prefers-reduced-motion: reduce)').matches)document.documentElement.dataset.intro='play'}catch(e){}</scr` +
+		`<script>(()=>{const root=document.documentElement;try{if((localStorage.getItem('${SEEN_KEY}')!=='1'||sessionStorage.getItem('${PLACE_KEY}')==='room')&&!matchMedia('(prefers-reduced-motion: reduce)').matches)root.dataset.intro='play'}catch(e){}const escape=e=>{if(!root.dataset.intro)return;if(e.type==='keydown'?e.key!=='Escape':!e.target.closest?.('[data-skip]'))return;e.preventDefault();e.stopImmediatePropagation();root.dataset.introSkipped='1';delete root.dataset.intro;root.style.overflow='';try{localStorage.setItem('${SEEN_KEY}','1')}catch(e){}try{sessionStorage.setItem('${PLACE_KEY}','page')}catch(e){}};document.addEventListener('pointerdown',escape,true);document.addEventListener('click',escape,true);document.addEventListener('keydown',escape,true);document.addEventListener('boot-hydrated',()=>{document.removeEventListener('pointerdown',escape,true);document.removeEventListener('click',escape,true);document.removeEventListener('keydown',escape,true)},{once:true})})();</scr` +
 		'ipt>'; // split so this file's own script tag doesn't end here
 
 	type NetworkInformation = { saveData?: boolean; effectiveType?: string };
 
 	let canvas = $state<HTMLCanvasElement>();
 	let layer = $state<HTMLDivElement>();
-	let phase = $state<'page' | 'loading' | 'room' | 'moving'>('page');
+	let phase = $state<'page' | 'loading' | 'room' | 'moving'>('loading');
 	let progress = $state(0);
 	let pressed = $state(false);
 	let focused = $state<Thing | null>(null);
@@ -230,21 +231,39 @@
 		// Still loading: show the page now; the room finishes loading behind it, ready for later.
 		skipped = true;
 		phase = 'page';
-		localStorage.setItem(SEEN_KEY, '1');
-		sessionStorage.setItem(PLACE_KEY, 'page');
 		hide();
+		rememberPage();
+	}
+
+	// Leaving still works if the browser won't let the site save this visit.
+	function rememberPage() {
+		try {
+			localStorage.setItem(SEEN_KEY, '1');
+		} catch {
+			// The page is already showing.
+		}
+		try {
+			sessionStorage.setItem(PLACE_KEY, 'page');
+		} catch {
+			// Nothing to restore on the next visit.
+		}
 	}
 
 	function onMode(mode: RoomMode) {
 		// (Skipped while loading: the room arriving doesn't take the page back over.)
 		if (skipped && mode === 'room') return;
-		if (mode === 'room' || mode === 'site')
-			sessionStorage.setItem(PLACE_KEY, mode === 'room' ? 'room' : 'page');
+		if (mode === 'room') {
+			try {
+				sessionStorage.setItem(PLACE_KEY, 'room');
+			} catch {
+				// The room can still open without saving its place.
+			}
+		}
 		if (mode === 'room') phase = 'room';
 		else if (mode === 'site') {
 			phase = 'page';
-			localStorage.setItem(SEEN_KEY, '1');
 			hide();
+			rememberPage();
 			room.ready = true;
 			room.open = openRoom;
 		} else phase = 'moving';
@@ -252,6 +271,7 @@
 
 	function openRoom() {
 		if (!engine || phase !== 'page') return;
+		skipped = false;
 		// Start invisible; the reverse animation fades the room in over the page.
 		layer!.style.opacity = '0';
 		show();
@@ -297,10 +317,25 @@
 		lanternLoaded = true;
 		const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 		// A first visit, or a reload while in the room, starts in the room.
-		const inRoom = sessionStorage.getItem(PLACE_KEY) === 'room';
-		const firstVisit = (localStorage.getItem(SEEN_KEY) !== '1' || inRoom) && !reduced;
+		let firstVisit = document.documentElement.dataset.intro === 'play' && !reduced;
+		try {
+			const inRoom = sessionStorage.getItem(PLACE_KEY) === 'room';
+			firstVisit = (localStorage.getItem(SEEN_KEY) !== '1' || inRoom) && !reduced;
+		} catch {
+			// Use the head script's choice if storage isn't available.
+		}
+		skipped = document.documentElement.dataset.introSkipped === '1';
+		delete document.documentElement.dataset.introSkipped;
+		document.dispatchEvent(new Event('boot-hydrated'));
+		if (skipped || !firstVisit) {
+			phase = 'page';
+			hide();
+		}
 
-		if (firstVisit) {
+		if (skipped) {
+			// An early SKIP keeps the same background load as one pressed during loading.
+			load('site').catch((error) => console.error('The room failed to load', error));
+		} else if (firstVisit) {
 			show();
 			phase = 'loading';
 			load('room').catch((error) => {
@@ -622,13 +657,18 @@
 			>
 			<span class="toggle" aria-hidden="true"><span></span></span>
 		</button>
-		{#if phase !== 'page'}
-			<button class="pill skip" onclick={skip}
-				>SKIP<svg class="arrow" viewBox="0 0 12 12" aria-hidden="true"
-					><path d="M3 1.5 10 6l-7 4.5z" /></svg
-				></button
-			>
-		{/if}
+		<a
+			class="pill skip"
+			href="#boot-page"
+			data-skip
+			onclick={(event) => {
+				event.preventDefault();
+				skip();
+			}}
+			>SKIP<svg class="arrow" viewBox="0 0 12 12" aria-hidden="true"
+				><path d="M3 1.5 10 6l-7 4.5z" /></svg
+			></a
+		>
 	</div>
 </div>
 
@@ -1589,6 +1629,8 @@
 	/* The letter spacing already leaves a gap after SKIP: the arrow sits just past it. */
 	.pill.skip {
 		gap: 0.1rem;
+		text-decoration: none;
+		touch-action: manipulation;
 	}
 
 	.pill .arrow {

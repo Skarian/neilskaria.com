@@ -22,7 +22,7 @@
 <BootIntro background={PAPER} />
 <ScreenFrame>
 	<div class="min-h-svh px-8 py-12 font-mono text-[#4c4f69] sm:px-14" style:background={PAPER}>
-		<main class="mx-auto flex max-w-3xl flex-col gap-10">
+		<main id="boot-page" class="mx-auto flex max-w-3xl flex-col gap-10">
 			<header class="rounded-lg border-4 border-[#4c4f69] bg-white p-1">
 				<div class="rounded border-2 border-[#acb0be] px-5 py-4">
 					<h1 class="text-2xl font-bold tracking-wide">NEIL SKARIA</h1>
