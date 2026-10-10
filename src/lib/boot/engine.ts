@@ -1240,6 +1240,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			} else drawBootScreen(screenCtx, s.boot, background);
 			screenTexture.needsUpdate = true;
 		}
+		rubiks.sync();
 		renderer.render(scene, camera);
 		if (outline.thing && outline.opacity > 0.001) {
 			const background = scene.background;

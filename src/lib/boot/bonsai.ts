@@ -333,10 +333,22 @@ export function createBonsai(root: THREE.Object3D) {
 
 	const foliageGeometry = new THREE.BufferGeometry();
 	foliageGeometry.setAttribute('position', new THREE.Float32BufferAttribute(leaf.position, 3));
-	foliageGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(leaf.normal, 3));
+	// (Kept compact on the GPU: normals in a byte each, ids as small whole numbers; a third of a
+	// degree off at most for the normals, the ids exact.)
+	foliageGeometry.setAttribute(
+		'normal',
+		new THREE.BufferAttribute(
+			Int8Array.from(leaf.normal, (v) => Math.round(v * 127)),
+			3,
+			true
+		)
+	);
 	foliageGeometry.setAttribute('color', new THREE.Float32BufferAttribute(leaf.color, 3));
-	foliageGeometry.setAttribute('shootId', new THREE.Float32BufferAttribute(leaf.shoot, 1));
-	foliageGeometry.setAttribute('node', new THREE.Float32BufferAttribute(leaf.node, 1));
+	foliageGeometry.setAttribute(
+		'shootId',
+		new THREE.BufferAttribute(Uint16Array.from(leaf.shoot), 1)
+	);
+	foliageGeometry.setAttribute('node', new THREE.BufferAttribute(Uint8Array.from(leaf.node), 1));
 	foliageGeometry.setAttribute('anchor', new THREE.Float32BufferAttribute(leaf.anchor, 3));
 	// Any material drawing the foliage shows only as much of each shoot as has grown, and sways.
 	function growing<M extends THREE.Material>(material: M) {

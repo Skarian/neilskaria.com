@@ -76,6 +76,38 @@ export function createRubiks(options: {
 				pieces.push(group);
 			}
 
+	// Drawn as a few batches (every body together, each colour's stickers together) rather than 80
+	// separate meshes. The pieces themselves stay as they are, unseen, for turning and picking; each
+	// frame the batches are posed to match them.
+	const batches = new Map<THREE.Material, THREE.Mesh[]>();
+	for (const p of pieces)
+		for (const mesh of p.children as THREE.Mesh[]) {
+			const material = mesh.material as THREE.Material;
+			if (!batches.has(material)) batches.set(material, []);
+			batches.get(material)!.push(mesh);
+			mesh.visible = false;
+		}
+	const drawn = [...batches].map(([material, meshes]) => {
+		const batch = new THREE.InstancedMesh(meshes[0].geometry, material, meshes.length);
+		batch.frustumCulled = false;
+		// (Picking goes by the pieces.)
+		batch.raycast = () => {};
+		root.add(batch);
+		return { batch, meshes };
+	});
+	const toRoot = new THREE.Matrix4();
+	const pose = new THREE.Matrix4();
+	function sync() {
+		root.updateMatrixWorld();
+		toRoot.copy(root.matrixWorld).invert();
+		for (const { batch, meshes } of drawn) {
+			for (const [i, mesh] of meshes.entries())
+				batch.setMatrixAt(i, pose.multiplyMatrices(toRoot, mesh.matrixWorld));
+			batch.instanceMatrix.needsUpdate = true;
+		}
+	}
+	sync();
+
 	// The layer being turned, and how far (in radians).
 	let turning: { axis: Axis; layer: number; angle: number } | null = null;
 
@@ -184,9 +216,10 @@ export function createRubiks(options: {
 	function dispose() {
 		bodyGeometry.dispose();
 		stickerGeometry.dispose();
+		for (const { batch } of drawn) batch.dispose();
 	}
 
-	return { root, orbit, step, grab, setAngle, settle, apply, animate, isSolved, dispose };
+	return { root, orbit, step, grab, setAngle, settle, apply, animate, isSolved, sync, dispose };
 }
 
 export type Rubiks = ReturnType<typeof createRubiks>;
