@@ -794,8 +794,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	camera.lookAt(view.target);
 	computeFinalCamera();
 
-	const sound = await sounding;
-	await document.fonts.ready;
 	// Shaders for everything, and the pictures onto the GPU, a piece at a time, then one frame drawn
 	// behind the loading screen: so the first real frame, and the first tap, don't stall.
 	// Submit shaders separately; their GPU compilation still runs in parallel.
@@ -850,6 +848,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	await breathe();
 	await Promise.all(compiling);
 	await breathe();
+	const sound = await sounding;
+	await document.fonts.ready;
 	// First-use program checks and uploads happen behind the loader, one material at a time.
 	// A pixel keeps these unseen draws cheap.
 	scene.updateMatrixWorld(true);
