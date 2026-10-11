@@ -859,7 +859,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	const warmed = new Set();
 	for (const mesh of preparing) {
 		if (!mesh.visible || !mesh.layers.test(camera.layers)) continue;
-		const program = renderer.properties.get(mesh.material).currentProgram;
+		const program = (renderer.properties.get(mesh.material) as { currentProgram: object })
+			.currentProgram;
 		if (warmed.has(program)) continue;
 		warmed.add(program);
 		const culled = mesh.frustumCulled;
