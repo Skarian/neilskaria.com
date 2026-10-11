@@ -10,7 +10,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { lightmapScales } from './assets';
 import { bakedLighting, bakedMaterial, fillLightmap, type BakedLighting } from './baked-material';
 import { fetchRoom } from './fetches';
-import { createBonsai, swayTime } from './bonsai';
+import { createBonsai, growBonsai, swayTime } from './bonsai';
 import { BOOT_DURATION, drawBootScreen } from './boot-screen';
 import { drawClockLED, drawFrequencyLED } from './clock-led';
 import { FM_MIN } from '#lib/radio/stations.js';
@@ -245,11 +245,14 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	)._loadLibrary = (_url, type) => (type === 'text' ? files.decoder.js : files.decoder.wasm);
 	draco.preload();
 	const progress = setInterval(() => onProgress(files.progress() * 0.7), 100);
+	// The bonsai's grower (bonsai.worker.ts), started now so its code arrives alongside the model.
+	const grower = new Worker(new URL('./bonsai.worker.ts', import.meta.url), { type: 'module' });
 	const gltf = await new GLTFLoader()
 		.setDRACOLoader(draco)
 		.parseAsync(await files.model.finally(() => clearInterval(progress)), '');
 	onProgress(0.75);
 	draco.dispose();
+	const growing = growBonsai(gltf.scene, grower);
 	const sounding = createBootSound(files.chime, options.muted);
 	const lighting: Record<string, BakedLighting> = {};
 	const lightmapsIn: Promise<void>[] = [];
@@ -416,8 +419,16 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	const CUBE_FROM = new THREE.Vector3(0.15, 0.55, 1).normalize();
 	const CUBE_LIFT = CUBE_FROM.clone().multiplyScalar(cubeSize * 2.4);
 
-	// The bonsai: its foliage grown here, on a turntable, lit live so it can turn (see bonsai.ts).
-	const bonsai = createBonsai(gltf.scene);
+	// The bonsai: its foliage grown in the worker, on a turntable, lit live so it can turn (see
+	// bonsai.ts).
+	const bonsai = await createBonsai(growing, breathe);
+	grower.terminate();
+	// Its buffers are big: they go to the GPU now, one at a time, while the pictures are still coming.
+	await upload(
+		['BonsaiShoots', 'BonsaiTwigs'].flatMap((name) =>
+			Object.values((bonsai.turntable.getObjectByName(name) as THREE.Mesh).geometry.attributes)
+		)
+	);
 	bonsai.load();
 	live.push(...bonsai.materials);
 	// Cut clumps fall onto the slate (or the table) and shrink away; water drops fall through the tree.
@@ -791,6 +802,28 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	// Touches turn the cube rather than scroll or zoom anything.
 	canvas.style.touchAction = 'none';
 	onProgress(1);
+
+	// Sends buffers to the GPU ahead of the first frame, with a breath after each. (three.js uploads a
+	// mesh's buffers when it's first rendered, so a stand-in carrying each in turn is rendered into a
+	// 1-pixel target. Its material is hidden: nothing is drawn, and no shader is needed.)
+	async function upload(attributes: (THREE.BufferAttribute | THREE.InterleavedBufferAttribute)[]) {
+		const geometry = new THREE.BufferGeometry();
+		const stand = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ visible: false }));
+		stand.frustumCulled = false;
+		const target = new THREE.WebGLRenderTarget(1, 1);
+		for (const attribute of attributes) {
+			geometry.setAttribute('position', attribute);
+			renderer.setRenderTarget(target);
+			renderer.render(stand, camera);
+			renderer.setRenderTarget(null);
+			await breathe();
+		}
+		// (The buffers stay: they're the tree's now.)
+		geometry.deleteAttribute('position');
+		geometry.dispose();
+		stand.material.dispose();
+		target.dispose();
+	}
 
 	// Lets the browser get on with anything else waiting (input, scrolling) between steps of building
 	// the room, so it never holds the page up for long.
