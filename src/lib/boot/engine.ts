@@ -740,10 +740,10 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		)
 	);
 
-	// Reflections need their picture's dimensions to prepare the right shaders.
-	await envIn;
-	await breathe();
-	if (import.meta.env.DEV && new URLSearchParams(location.search).has('capture-env')) captureEnv();
+	if (import.meta.env.DEV && new URLSearchParams(location.search).has('capture-env')) {
+		await Promise.all([...lightmapsIn, portraitIn, envIn]);
+		captureEnv();
+	}
 	for (const material of live) {
 		material.envMap = envMap;
 		// Matched by eye to the baked props beside it (the bonsai, being rougher, takes less).
@@ -805,10 +805,17 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		const key = `${material.uuid}:${mesh instanceof THREE.InstancedMesh}:${mesh instanceof THREE.Points}:${Object.keys(mesh.geometry.attributes)}`;
 		programs.set(key, mesh);
 	}
-	const preparing = [...programs.values()];
+	// Baked surfaces can compile before the reflections arrive.
+	const preparing = [...programs.values()].sort(
+		(a, b) =>
+			Number(a.material instanceof THREE.MeshStandardMaterial) -
+			Number(b.material instanceof THREE.MeshStandardMaterial)
+	);
 	const compiling: Promise<unknown>[] = [];
 	const batch = new THREE.Scene();
 	for (const mesh of preparing) {
+		// Reflections need their picture's dimensions to prepare the right shader.
+		if (mesh.material instanceof THREE.MeshStandardMaterial) await envIn;
 		const children = mesh.children;
 		mesh.children = [];
 		batch.children = [mesh];
