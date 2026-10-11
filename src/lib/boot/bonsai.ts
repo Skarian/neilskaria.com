@@ -393,6 +393,47 @@ async function attachBonsai(pending: ReturnType<typeof startBonsai>) {
 	};
 }
 
+// Put the tree's buffers on the GPU while the pictures download, one attribute at a time.
+// The little offscreen pass draws no vertices and leaves the shared attributes for the room.
+export async function uploadBonsai(
+	renderer: THREE.WebGLRenderer,
+	bonsai: Bonsai,
+	canvas: HTMLCanvasElement
+) {
+	const scene = new THREE.Scene();
+	const camera = new THREE.Camera();
+	const geometry = new THREE.BufferGeometry();
+	geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1);
+	geometry.setDrawRange(0, 0);
+	const material = new THREE.MeshBasicMaterial({ toneMapped: false });
+	material.visible = false;
+	const mesh = new THREE.Mesh(geometry, material);
+	mesh.frustumCulled = false;
+	scene.add(mesh);
+	const target = new THREE.WebGLRenderTarget(1, 1);
+	const previous = renderer.getRenderTarget();
+	try {
+		for (const name of ['BonsaiShoots', 'BonsaiTwigs']) {
+			const tree = bonsai.turntable.getObjectByName(name) as THREE.Mesh;
+			for (const attribute of Object.values(tree.geometry.attributes)) {
+				if (!canvas.isConnected) return;
+				geometry.setAttribute('position', attribute);
+				renderer.setRenderTarget(target);
+				renderer.render(scene, camera);
+				renderer.setRenderTarget(previous);
+				await startupYield();
+			}
+		}
+	} finally {
+		// Disposing this geometry must not delete the buffers now shared with the real tree.
+		geometry.deleteAttribute('position');
+		geometry.dispose();
+		material.dispose();
+		renderer.setRenderTarget(previous);
+		target.dispose();
+	}
+}
+
 function setBounds(geometry: THREE.BufferGeometry, bounds: Float64Array) {
 	geometry.boundingBox = new THREE.Box3(
 		new THREE.Vector3().fromArray(bounds, 0),

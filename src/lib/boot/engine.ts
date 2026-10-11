@@ -10,7 +10,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { lightmapScales } from './assets';
 import { bakedLighting, bakedMaterial, fillLightmap, type BakedLighting } from './baked-material';
 import { fetchRoom } from './fetches';
-import { createBonsai, prepareBonsai, startBonsai, swayTime } from './bonsai';
+import { createBonsai, prepareBonsai, startBonsai, swayTime, uploadBonsai } from './bonsai';
 import { BOOT_DURATION, drawBootScreen } from './boot-screen';
 import { drawClockLED, drawFrequencyLED } from './clock-led';
 import { FM_MIN } from '#lib/radio/stations.js';
@@ -429,6 +429,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 
 	// The bonsai: its foliage grown here, on a turntable, lit live so it can turn (see bonsai.ts).
 	const bonsai = await createBonsai(bonsaiGrowing);
+	await uploadBonsai(renderer, bonsai, canvas);
 	await breathe();
 	bonsai.load();
 	live.push(...bonsai.materials);
