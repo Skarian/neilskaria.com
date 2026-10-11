@@ -741,9 +741,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		)
 	);
 
-	// Everything from here on needs the room's pictures.
-	await Promise.all([...lightmapsIn, portraitIn, envIn]);
-	onProgress(0.9);
+	// Reflections need their picture's dimensions to prepare the right shaders.
+	await envIn;
 	await breathe();
 	if (import.meta.env.DEV && new URLSearchParams(location.search).has('capture-env')) captureEnv();
 	for (const material of live) {
@@ -829,6 +828,10 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		compiling.push(renderer.compileAsync(extras, camera, scene));
 		clump?.geometry.dispose();
 	}
+	// The other pictures can keep downloading while shaders are submitted.
+	await Promise.all([...lightmapsIn, portraitIn]);
+	onProgress(0.9);
+	await breathe();
 	for (const group of Object.values(lighting)) {
 		renderer.initTexture(group.base);
 		await breathe();
