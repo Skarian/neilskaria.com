@@ -6,8 +6,8 @@ import type * as THREE from 'three';
 
 // How high things start (scene units: 1 is 10 cm), how long the fall and the settle take, and how
 // far behind the console the cube comes.
-const DROP_HEIGHT = 0.35;
-const DROP_MS = 300;
+const DROP_HEIGHT = 0.175;
+const DROP_MS = 210;
 const SETTLE_MS = 200;
 const CUBE_DELAY_MS = 250;
 // The tilt each starts with (degrees), levelling out as it falls, and the roll on contact.
