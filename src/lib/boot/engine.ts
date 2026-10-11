@@ -851,26 +851,26 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	await breathe();
 	const sound = await sounding;
 	await document.fonts.ready;
-	// First-use program checks and uploads happen behind the loader, one material at a time.
+	// First-use program checks and uploads happen behind the loader, a few meshes at a time.
 	// A pixel keeps these unseen draws cheap.
 	scene.updateMatrixWorld(true);
 	renderer.setScissor(0, 0, 1, 1);
 	renderer.setScissorTest(true);
-	const warmed = new Set();
-	for (const mesh of preparing) {
-		if (!mesh.visible || !mesh.layers.test(camera.layers)) continue;
-		const program = (renderer.properties.get(mesh.material) as { currentProgram: object })
-			.currentProgram;
-		if (warmed.has(program)) continue;
-		warmed.add(program);
-		const culled = mesh.frustumCulled;
-		mesh.frustumCulled = false;
-		const children = mesh.children;
-		mesh.children = [];
-		batch.children = [key, fill, lanternLight, mesh];
+	const warming = drawn.filter((mesh) => mesh.visible && mesh.layers.test(camera.layers));
+	for (let i = 0; i < warming.length; i += 2) {
+		const parts = warming.slice(i, i + 2);
+		const children = parts.map((mesh) => mesh.children);
+		const culled = parts.map((mesh) => mesh.frustumCulled);
+		for (const mesh of parts) {
+			mesh.children = [];
+			mesh.frustumCulled = false;
+		}
+		batch.children = [key, fill, lanternLight, ...parts];
 		renderer.render(batch, camera);
-		mesh.children = children;
-		mesh.frustumCulled = culled;
+		for (const [j, mesh] of parts.entries()) {
+			mesh.children = children[j];
+			mesh.frustumCulled = culled[j];
+		}
 		await breathe();
 	}
 	renderer.setScissorTest(false);
