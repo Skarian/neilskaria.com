@@ -829,8 +829,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		compiling.push(renderer.compileAsync(extras, camera, scene));
 		clump?.geometry.dispose();
 	}
-	await Promise.all(compiling);
-	await breathe();
 	for (const group of Object.values(lighting)) {
 		renderer.initTexture(group.base);
 		await breathe();
@@ -840,6 +838,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	renderer.initTexture(envMap);
 	await breathe();
 	renderer.initTexture(portraitArt);
+	await breathe();
+	await Promise.all(compiling);
 	await breathe();
 	// First-use program checks and uploads happen behind the loader, one material at a time.
 	// A pixel keeps these unseen draws cheap.
