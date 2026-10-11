@@ -811,8 +811,11 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	const compiling: Promise<unknown>[] = [];
 	const batch = new THREE.Scene();
 	for (const mesh of preparing) {
+		const children = mesh.children;
+		mesh.children = [];
 		batch.children = [mesh];
 		compiling.push(renderer.compileAsync(batch, camera, scene));
+		mesh.children = children;
 		await breathe();
 	}
 	{
@@ -846,8 +849,11 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	for (const mesh of preparing) {
 		const culled = mesh.frustumCulled;
 		mesh.frustumCulled = false;
+		const children = mesh.children;
+		mesh.children = [];
 		batch.children = [key, fill, lanternLight, mesh];
 		renderer.render(batch, camera);
+		mesh.children = children;
 		mesh.frustumCulled = culled;
 		await breathe();
 	}
