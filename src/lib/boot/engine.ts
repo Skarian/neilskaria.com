@@ -855,7 +855,12 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	scene.updateMatrixWorld(true);
 	renderer.setScissor(0, 0, 1, 1);
 	renderer.setScissorTest(true);
+	const warmed = new Set();
 	for (const mesh of preparing) {
+		if (!mesh.visible || !mesh.layers.test(camera.layers)) continue;
+		const program = renderer.properties.get(mesh.material).currentProgram;
+		if (warmed.has(program)) continue;
+		warmed.add(program);
 		const culled = mesh.frustumCulled;
 		mesh.frustumCulled = false;
 		const children = mesh.children;
