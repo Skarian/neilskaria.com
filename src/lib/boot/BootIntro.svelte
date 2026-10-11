@@ -268,6 +268,7 @@
 
 	function start() {
 		if (phase !== 'room' || pressed) return;
+		engine?.wakeSound();
 		// Let the button visibly press before the room starts moving.
 		pressed = true;
 		setTimeout(() => {

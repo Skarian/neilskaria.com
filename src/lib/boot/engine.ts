@@ -62,6 +62,8 @@ export type RoomOptions = {
 };
 
 export type Room = {
+	// Lets sound play. Call it in the tap or key press itself: an iPhone won't allow it any later.
+	wakeSound: () => void;
 	enterSite: () => void;
 	skipToSite: () => void;
 	returnToRoom: () => void;
@@ -2278,6 +2280,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	setMode(mode);
 	emitCube();
 	return {
+		wakeSound: () => void sound.resume(),
 		enterSite,
 		skipToSite,
 		returnToRoom,
