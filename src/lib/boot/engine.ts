@@ -7,6 +7,7 @@ import { gsap } from 'gsap';
 import * as THREE from 'three';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import consoleHull from './assets/console-hull.json';
 import { lightmapScales } from './assets';
 import { bakedLighting, bakedMaterial, fillLightmap, type BakedLighting } from './baked-material';
 import { fetchRoom } from './fetches';
@@ -664,28 +665,31 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	for (const thing of Object.keys(hover) as Thing[]) {
 		// (Most objects are one shape, whatever their parts are called; the cube's pieces have no names.)
 		for (const part of PICK_PARTS[thing] ?? [null]) {
-			const parts = meshes.filter(([m, of]) => of === thing && (!part || part.test(m.name)));
-			const points: THREE.Vector3[] = [];
-			if (thing === 'sp')
-				for (const p of sp.userData.pickPoints)
-					points.push(new THREE.Vector3().fromArray(p).applyMatrix4(sp.matrixWorld));
-			for (const [mesh] of thing === 'sp' ? [] : parts) {
-				// The bonsai's foliage holds room to grow wild: its shape is taken as it looks neat.
-				if (mesh.name === 'BonsaiShoots') {
-					for (const shoot of bonsai.shoots)
-						for (const node of shoot.nodes.slice(0, shoot.neat))
-							points.push(node.clone().applyMatrix4(bonsai.turntable.matrixWorld));
-					continue;
+			let geometry: THREE.BufferGeometry;
+			if (thing === 'sp') {
+				// The console's, the slowest to work out on a phone, comes ready-made (see pack.mjs).
+				const points = consoleHull.points.map((p) =>
+					new THREE.Vector3().fromArray(p).applyMatrix4(sp.matrixWorld)
+				);
+				geometry = new THREE.BufferGeometry().setFromPoints(points).setIndex(consoleHull.faces);
+			} else {
+				const parts = meshes.filter(([m, of]) => of === thing && (!part || part.test(m.name)));
+				const points: THREE.Vector3[] = [];
+				for (const [mesh] of parts) {
+					// The bonsai's foliage holds room to grow wild: its shape is taken as it looks neat.
+					if (mesh.name === 'BonsaiShoots') {
+						for (const shoot of bonsai.shoots)
+							for (const node of shoot.nodes.slice(0, shoot.neat))
+								points.push(node.clone().applyMatrix4(bonsai.turntable.matrixWorld));
+						continue;
+					}
+					for (const p of spread(mesh.geometry, 20))
+						points.push(p.clone().applyMatrix4(mesh.matrixWorld));
 				}
-				for (const p of spread(mesh.geometry, 20))
-					points.push(p.clone().applyMatrix4(mesh.matrixWorld));
+				if (points.length < 4) continue;
+				await breathe();
+				geometry = new ConvexGeometry(points);
 			}
-			if (points.length < 4) continue;
-			await breathe();
-			const geometry =
-				thing === 'sp'
-					? new THREE.BufferGeometry().setFromPoints(points).setIndex(sp.userData.pickFaces)
-					: new ConvexGeometry(points);
 			const picker = new THREE.Mesh(geometry);
 			picker.userData.thing = thing;
 			picker.matrixAutoUpdate = false;
@@ -725,7 +729,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	scene.traverse((object) => {
 		if (object instanceof THREE.Mesh || object instanceof THREE.Points) drawn.push(object);
 	});
-	// Shared shapes and buffers need preparing only once, before any real draw.
+	// Each shape's bounds, which the first frame would otherwise work out all at once. (A sphere round
+	// the box: a little looser than three.js's own, which only makes culling a touch more cautious.)
 	const shapes = [...new Set(drawn.map((mesh) => mesh.geometry))];
 	for (const geometry of shapes) {
 		if (!geometry.boundingSphere) {
@@ -734,7 +739,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			await breathe();
 		}
 	}
-	// Small buffers warm with their meshes; only big uploads need separate tasks.
+	// And the big buffers to the GPU, one at a time (the small ones go with their meshes, below).
 	await upload(
 		[...new Set(shapes.flatMap((geometry) => Object.values(geometry.attributes)))].filter(
 			(attribute) => attribute.array.byteLength > 65536 && !foliage.includes(attribute)
@@ -796,13 +801,15 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	computeFinalCamera();
 
 	// Shaders for everything, and the pictures onto the GPU, a piece at a time, then one frame drawn
-	// behind the loading screen: so the first real frame, and the first tap, don't stall.
-	// Submit shaders separately; their GPU compilation still runs in parallel.
+	// behind the loading screen: so the first real frame, and the first tap, don't stall. Each shader
+	// is handed over in its own step (the GPU still compiles them side by side).
+	// One mesh per shader: a material needs another when it's on a different kind of mesh, or a
+	// shape with different attributes.
 	const programs = new Map<string, THREE.Mesh | THREE.Points>();
 	for (const mesh of drawn) {
 		const material = mesh.material as THREE.Material;
-		const key = `${material.uuid}:${mesh instanceof THREE.InstancedMesh}:${mesh instanceof THREE.Points}:${Object.keys(mesh.geometry.attributes)}`;
-		programs.set(key, mesh);
+		const kind = mesh instanceof THREE.InstancedMesh ? 'instanced' : mesh.type;
+		programs.set(`${material.uuid} ${kind} ${Object.keys(mesh.geometry.attributes)}`, mesh);
 	}
 	// Baked surfaces can compile before the reflections arrive.
 	const preparing = [...programs.values()].sort(
@@ -811,15 +818,10 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			Number(b.material instanceof THREE.MeshStandardMaterial)
 	);
 	const compiling: Promise<unknown>[] = [];
-	const batch = new THREE.Scene();
 	for (const mesh of preparing) {
 		// Reflections need their picture's dimensions to prepare the right shader.
 		if (mesh.material instanceof THREE.MeshStandardMaterial) await envIn;
-		const children = mesh.children;
-		mesh.children = [];
-		batch.children = [mesh];
-		compiling.push(renderer.compileAsync(batch, camera, scene));
-		mesh.children = children;
+		compiling.push(renderer.compileAsync(mesh, camera, scene));
 		await breathe();
 	}
 	{
@@ -851,29 +853,34 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	await breathe();
 	const sound = await sounding;
 	await document.fonts.ready;
-	// First-use program checks and uploads happen behind the loader, a few meshes at a time.
-	// A pixel keeps these unseen draws cheap.
-	scene.updateMatrixWorld(true);
+	// The first draw of each mesh does more than draw (checks its shader, uploads its buffers), so the
+	// room is drawn behind the loader two meshes at a time first, into a single pixel. A spare layer
+	// picks them out, with the lights, so the shaders are the room's own.
+	const WARM = 31;
+	const warming = drawn.filter((mesh) => mesh.visible && mesh.layers.test(camera.layers));
+	const lights = [key, fill, lanternLight];
+	const seen = camera.layers.mask;
+	camera.layers.set(WARM);
+	for (const light of lights) light.layers.enable(WARM);
 	renderer.setScissor(0, 0, 1, 1);
 	renderer.setScissorTest(true);
-	const warming = drawn.filter((mesh) => mesh.visible && mesh.layers.test(camera.layers));
 	for (let i = 0; i < warming.length; i += 2) {
 		const parts = warming.slice(i, i + 2);
-		const children = parts.map((mesh) => mesh.children);
 		const culled = parts.map((mesh) => mesh.frustumCulled);
 		for (const mesh of parts) {
-			mesh.children = [];
+			mesh.layers.enable(WARM);
 			mesh.frustumCulled = false;
 		}
-		batch.children = [key, fill, lanternLight, ...parts];
-		renderer.render(batch, camera);
+		renderer.render(scene, camera);
 		for (const [j, mesh] of parts.entries()) {
-			mesh.children = children[j];
+			mesh.layers.disable(WARM);
 			mesh.frustumCulled = culled[j];
 		}
 		await breathe();
 	}
 	renderer.setScissorTest(false);
+	for (const light of lights) light.layers.disable(WARM);
+	camera.layers.mask = seen;
 	renderer.render(scene, camera);
 	await breathe();
 

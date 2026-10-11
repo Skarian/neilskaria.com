@@ -22,8 +22,9 @@ import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import * as fn from '@gltf-transform/functions';
 import { MeshoptSimplifier } from 'meshoptimizer';
+import { format, resolveConfig } from 'prettier';
 import sharp from 'sharp';
-import { Vector3, Matrix4, BufferGeometry, BufferAttribute } from 'three';
+import { Box3, BufferAttribute, Matrix4, Vector3 } from 'three';
 import { ConvexHull } from 'three/addons/math/ConvexHull.js';
 
 const require = createRequire(import.meta.url);
@@ -68,6 +69,53 @@ const LIGHTMAPS = {
 
 const kb = (bytes) => `${Math.round(bytes / 1024)} KB`;
 const report = [];
+
+// The console's click shape, worked out here because it's slow on a phone: the convex hull of its
+// parts, sampled as the room samples the others (engine.ts's spread(): in a 20-cell grid over each
+// part, one point a cell), from the positions as decoded, in the console's own space.
+async function packConsoleHull(doc) {
+	const sp = doc.getRoot().listNodes().find((node) => node.getName() === 'SP');
+	const toConsole = new Matrix4().fromArray(sp.getWorldMatrix()).invert();
+	const points = [];
+	const nodes = [sp];
+	for (const node of nodes) {
+		nodes.push(...node.listChildren());
+		if (!node.getMesh()) continue;
+		const matrix = new Matrix4().fromArray(node.getWorldMatrix()).premultiply(toConsole);
+		for (const primitive of node.getMesh().listPrimitives()) {
+			const position = new BufferAttribute(primitive.getAttribute('POSITION').getArray(), 3);
+			const box = new Box3().setFromBufferAttribute(position);
+			const size = box.getSize(new Vector3());
+			const cell = Math.max(size.x, size.y, size.z) / 20 || 1;
+			const first = new Map();
+			for (let i = 0; i < position.count; i++) {
+				const p = new Vector3().fromBufferAttribute(position, i);
+				const key =
+					Math.floor((p.x - box.min.x) / cell) +
+					Math.floor((p.y - box.min.y) / cell) * 1024 +
+					Math.floor((p.z - box.min.z) / cell) * 1048576;
+				const q = first.get(key);
+				if (!q || p.x < q.x || (p.x === q.x && (p.y < q.y || (p.y === q.y && p.z < q.z))))
+					first.set(key, p);
+			}
+			for (const p of first.values()) points.push(p.applyMatrix4(matrix));
+		}
+	}
+	const hull = new ConvexHull().setFromPoints(points);
+	const corners = hull.faces.flatMap(({ edge }) => [
+		edge.head().point,
+		edge.next.head().point,
+		edge.prev.head().point
+	]);
+	const vertices = [...new Set(corners)];
+	// (Formatted as the repo's other files are, so the lint check passes.)
+	const file = path(TO, 'console-hull.json');
+	const json = JSON.stringify({
+		points: vertices.map((p) => p.toArray()),
+		faces: corners.map((p) => vertices.indexOf(p))
+	});
+	writeFileSync(file, await format(json, { ...(await resolveConfig(file)), parser: 'json' }));
+}
 
 async function packModel() {
 	const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({
@@ -138,58 +186,7 @@ async function packModel() {
 	await io.write(out, doc);
 
 	const packed = await io.read(out);
-	// The console's picking grid is expensive on a phone. Store its hull in the console's space,
-	// using the decoded positions so Draco cannot nudge the result.
-	const console = packed.getRoot().listNodes().find((node) => node.getName() === 'SP');
-	const toConsole = new Matrix4().fromArray(console.getWorldMatrix()).invert();
-	const nodes = [console];
-	const points = [];
-	for (const node of nodes) {
-		nodes.push(...node.listChildren());
-		if (!node.getMesh()) continue;
-		const matrix = new Matrix4().fromArray(node.getWorldMatrix()).premultiply(toConsole);
-		for (const primitive of node.getMesh().listPrimitives()) {
-			const geometry = new BufferGeometry().setAttribute(
-				'position', new BufferAttribute(primitive.getAttribute('POSITION').getArray(), 3)
-			);
-			geometry.computeBoundingBox();
-			const box = geometry.boundingBox;
-			const size = box.getSize(new Vector3());
-			const cell = Math.max(size.x, size.y, size.z) / 20 || 1;
-			const best = new Map();
-			for (let i = 0; i < geometry.attributes.position.count; i++) {
-				const p = new Vector3().fromBufferAttribute(geometry.attributes.position, i);
-				const key = Math.floor((p.x - box.min.x) / cell) +
-					Math.floor((p.y - box.min.y) / cell) * 1024 +
-					Math.floor((p.z - box.min.z) / cell) * 1048576;
-				const b = best.get(key);
-				if (!b || p.x < b.x || (p.x === b.x && (p.y < b.y || (p.y === b.y && p.z < b.z))))
-					best.set(key, p);
-			}
-			points.push(...[...best.values()].map((p) => p.applyMatrix4(matrix)));
-		}
-	}
-	const hull = new ConvexHull().setFromPoints(points);
-	const vertices = [...new Set(hull.faces.flatMap(({ edge }) =>
-		[edge.head().point, edge.next.head().point, edge.prev.head().point]))];
-	// Keep the existing binary chunk intact: only the node's extras change.
-	const bytes = readFileSync(out);
-	const jsonLength = bytes.readUInt32LE(12);
-	const json = JSON.parse(bytes.subarray(20, 20 + jsonLength).toString());
-	const node = json.nodes.find((node) => node.name === 'SP');
-	node.extras = {
-		...node.extras,
-		pickPoints: vertices.map((p) => p.toArray()),
-		pickFaces: hull.faces.flatMap(({ edge }) =>
-			[edge.head().point, edge.next.head().point, edge.prev.head().point].map((p) => vertices.indexOf(p)))
-	};
-	const text = Buffer.from(JSON.stringify(json));
-	const padded = Buffer.alloc(Math.ceil(text.length / 4) * 4, 32);
-	text.copy(padded);
-	const header = Buffer.from(bytes.subarray(0, 20));
-	header.writeUInt32LE(20 + padded.length + bytes.length - 20 - jsonLength, 8);
-	header.writeUInt32LE(padded.length, 12);
-	writeFileSync(out, Buffer.concat([header, padded, bytes.subarray(20 + jsonLength)]));
+	await packConsoleHull(packed);
 
 	// The twigs' roots must still sit on the trunk.
 	const roots = JSON.parse(readFileSync(path(TO, 'bonsai-roots.json'), 'utf8')).roots;
