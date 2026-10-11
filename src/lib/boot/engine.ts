@@ -660,12 +660,16 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	// (The tree always starts, and is put back, facing the front.)
 	gltf.scene.updateMatrixWorld(true);
 	const turntableRest = bonsai.turntable.matrixWorld.clone().invert();
+	await breathe();
 	for (const thing of Object.keys(hover) as Thing[]) {
 		// (Most objects are one shape, whatever their parts are called; the cube's pieces have no names.)
 		for (const part of PICK_PARTS[thing] ?? [null]) {
 			const parts = meshes.filter(([m, of]) => of === thing && (!part || part.test(m.name)));
 			const points: THREE.Vector3[] = [];
-			for (const [mesh] of parts) {
+			if (thing === 'sp')
+				for (const p of sp.userData.pickPoints)
+					points.push(new THREE.Vector3().fromArray(p).applyMatrix4(sp.matrixWorld));
+			for (const [mesh] of thing === 'sp' ? [] : parts) {
 				// The bonsai's foliage holds room to grow wild: its shape is taken as it looks neat.
 				if (mesh.name === 'BonsaiShoots') {
 					for (const shoot of bonsai.shoots)
@@ -677,11 +681,17 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 					points.push(p.clone().applyMatrix4(mesh.matrixWorld));
 			}
 			if (points.length < 4) continue;
-			const picker = new THREE.Mesh(new ConvexGeometry(points));
+			await breathe();
+			const geometry =
+				thing === 'sp'
+					? new THREE.BufferGeometry().setFromPoints(points).setIndex(sp.userData.pickFaces)
+					: new ConvexGeometry(points);
+			const picker = new THREE.Mesh(geometry);
 			picker.userData.thing = thing;
 			picker.matrixAutoUpdate = false;
 			picker.updateMatrixWorld();
 			pickers.push(picker);
+			await breathe();
 		}
 	}
 
