@@ -227,7 +227,7 @@ export async function createRubiks(options: {
 	return { root, orbit, step, grab, setAngle, settle, apply, animate, isSolved, sync, dispose };
 }
 
-export type Rubiks = ReturnType<typeof createRubiks>;
+export type Rubiks = Awaited<ReturnType<typeof createRubiks>>;
 
 function roundedSquare(side: number, radius: number) {
 	const h = side / 2;
