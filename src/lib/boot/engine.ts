@@ -126,7 +126,14 @@ export function startView(aspect: number) {
 export async function createRoom(options: RoomOptions): Promise<Room> {
 	const { canvas, layer, background, onProgress, onMode, onFocus, onCube, onBonsai } = options;
 
-	const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+	const bonsaiWorker = prepareBonsai(canvas);
+	let renderer: THREE.WebGLRenderer;
+	try {
+		renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+	} catch (error) {
+		bonsaiWorker.cancel();
+		throw error;
+	}
 	renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 	renderer.setSize(innerWidth, innerHeight, false);
 	renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -243,7 +250,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	)._loadLibrary = (_url, type) => (type === 'text' ? files.decoder.js : files.decoder.wasm);
 	draco.preload();
 	const progress = setInterval(() => onProgress(files.progress() * 0.7), 100);
-	const bonsaiWorker = prepareBonsai(canvas);
 	const gltf = await files.model
 		.finally(() => clearInterval(progress))
 		.then((model) => new GLTFLoader().setDRACOLoader(draco).parseAsync(model, ''))

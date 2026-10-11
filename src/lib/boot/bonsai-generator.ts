@@ -4,7 +4,6 @@
 import { Vector3 } from 'three/src/math/Vector3.js';
 import { Matrix3 } from 'three/src/math/Matrix3.js';
 import { Matrix4 } from 'three/src/math/Matrix4.js';
-import { Color } from 'three/src/math/Color.js';
 import * as MathUtils from 'three/src/math/MathUtils.js';
 import { CatmullRomCurve3 } from 'three/src/extras/curves/CatmullRomCurve3.js';
 import { QuadraticBezierCurve3 } from 'three/src/extras/curves/QuadraticBezierCurve3.js';
@@ -20,12 +19,12 @@ const PADS: { centre: [number, number, number]; size: [number, number, number]; 
 
 // Juniper greens (linear), as the old needles had, and the paler green of new growth.
 const GREENS = [
-	new Color(0.042, 0.13, 0.06),
-	new Color(0.075, 0.21, 0.09),
-	new Color(0.13, 0.3, 0.15),
-	new Color(0.07, 0.2, 0.15)
+	[0.042, 0.13, 0.06],
+	[0.075, 0.21, 0.09],
+	[0.13, 0.3, 0.15],
+	[0.07, 0.2, 0.15]
 ];
-const NEW_GROWTH = new Color(0.2, 0.4, 0.12);
+const NEW_GROWTH = [0.2, 0.4, 0.12];
 
 export type BonsaiInput = { roots: number[][]; seed: number; fromModel: number[] };
 
@@ -42,6 +41,8 @@ export type BonsaiBuffers = {
 	twigNormal: Float32Array;
 	lengths: Float32Array;
 	pace: Float32Array;
+	foliageBounds: Float64Array;
+	twigBounds: Float64Array;
 	// Doubles keep the picking points exactly as they were before packing.
 	hubs: Float64Array;
 	nodes: Float64Array;
@@ -203,11 +204,14 @@ export function* generateBonsai(input: BonsaiInput): Generator<void, BonsaiBuffe
 				const depth = Math.min(1, e.length());
 				let shade = grown ? 1 : 0.35 + 0.65 * MathUtils.smoothstep(depth, 0.2, 1);
 				if (!grown && p.z < c.z) shade *= 0.75;
-				const colour = (
-					grown ? green.clone().lerp(NEW_GROWTH, Math.min(1, (k - neat + 1) / 3)) : green
-				)
-					.clone()
-					.multiplyScalar(shade);
+				// These colours are already linear RGB; keep the same interpolation and shade.
+				const colour = green.slice();
+				if (grown) {
+					const amount = Math.min(1, (k - neat + 1) / 3);
+					for (let channel = 0; channel < 3; channel++)
+						colour[channel] += (NEW_GROWTH[channel] - colour[channel]) * amount;
+				}
+				for (let channel = 0; channel < 3; channel++) colour[channel] *= shade;
 				// The foliage is lit as if round: its normal points out from the pad's centre.
 				const out = e.lengthSq() > 1e-6 ? e.clone().divide(r).normalize() : up.clone();
 				const normal = out.lerp(up, 0.3).normalize();
@@ -217,7 +221,7 @@ export function* generateBonsai(input: BonsaiInput): Generator<void, BonsaiBuffe
 					const a = prev.clone().applyMatrix4(fromModel);
 					leaf.position.push(q.x, q.y, q.z);
 					leaf.normal.push(nn.x, nn.y, nn.z);
-					leaf.color.push(colour.r, colour.g, colour.b);
+					leaf.color.push(...colour);
 					leaf.shoot.push(shootId);
 					leaf.node.push(k);
 					leaf.anchor.push(a.x, a.y, a.z);
@@ -297,17 +301,21 @@ export function* generateBonsai(input: BonsaiInput): Generator<void, BonsaiBuffe
 		yield;
 	}
 	offsets[count] = nodes.length / 3;
+	const position = yield* pack(leaf.position, new Float32Array(leaf.position.length));
+	const twigPosition = yield* pack(twig.position, new Float32Array(twig.position.length));
 	return {
-		position: yield* pack(leaf.position, new Float32Array(leaf.position.length)),
+		position,
 		normal: yield* pack(leaf.normal, new Int8Array(leaf.normal.length), 127),
 		color: yield* pack(leaf.color, new Float32Array(leaf.color.length)),
 		shootId: yield* pack(leaf.shoot, new Uint16Array(leaf.shoot.length)),
 		node: yield* pack(leaf.node, new Uint8Array(leaf.node.length)),
 		anchor: yield* pack(leaf.anchor, new Float32Array(leaf.anchor.length)),
-		twigPosition: yield* pack(twig.position, new Float32Array(twig.position.length)),
+		twigPosition,
 		twigNormal: yield* pack(twig.normal, new Float32Array(twig.normal.length)),
 		lengths,
 		pace,
+		foliageBounds: yield* bounds(position),
+		twigBounds: yield* bounds(twigPosition),
 		hubs,
 		nodes: yield* pack(nodes, new Float64Array(nodes.length)),
 		neat,
@@ -327,6 +335,48 @@ function* pack<
 		yield;
 	}
 	return target;
+}
+
+// The renderer needs these on its first frame. Scan the packed positions here, rather than
+// making it walk every needle on the page thread; the fallback shares the same short chunks.
+function* bounds(position: Float32Array): Generator<void, Float64Array> {
+	const result = new Float64Array([
+		Infinity,
+		Infinity,
+		Infinity,
+		-Infinity,
+		-Infinity,
+		-Infinity,
+		0,
+		0,
+		0,
+		0
+	]);
+	for (let start = 0; start < position.length; start += 8192 * 3) {
+		const end = Math.min(start + 8192 * 3, position.length);
+		for (let i = start; i < end; i += 3) {
+			for (let channel = 0; channel < 3; channel++) {
+				result[channel] = Math.min(result[channel], position[i + channel]);
+				result[channel + 3] = Math.max(result[channel + 3], position[i + channel]);
+			}
+		}
+		yield;
+	}
+	for (let channel = 0; channel < 3; channel++)
+		result[channel + 6] = (result[channel] + result[channel + 3]) * 0.5;
+	let radiusSquared = 0;
+	for (let start = 0; start < position.length; start += 8192 * 3) {
+		const end = Math.min(start + 8192 * 3, position.length);
+		for (let i = start; i < end; i += 3) {
+			const x = position[i] - result[6];
+			const y = position[i + 1] - result[7];
+			const z = position[i + 2] - result[8];
+			radiusSquared = Math.max(radiusSquared, x * x + y * y + z * z);
+		}
+		yield;
+	}
+	result[9] = Math.sqrt(radiusSquared);
+	return result;
 }
 
 function weighted(x: number, weights: number[]) {

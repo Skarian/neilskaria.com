@@ -213,6 +213,7 @@ async function attachBonsai(pending: ReturnType<typeof startBonsai>) {
 	foliageGeometry.setAttribute('shootId', new THREE.BufferAttribute(data.shootId, 1));
 	foliageGeometry.setAttribute('node', new THREE.BufferAttribute(data.node, 1));
 	foliageGeometry.setAttribute('anchor', new THREE.BufferAttribute(data.anchor, 3));
+	setBounds(foliageGeometry, data.foliageBounds);
 	// Any material drawing the foliage shows only as much of each shoot as has grown, and sways.
 	function growing<M extends THREE.Material>(material: M) {
 		material.onBeforeCompile = (shader) => {
@@ -267,6 +268,7 @@ async function attachBonsai(pending: ReturnType<typeof startBonsai>) {
 	const twigGeometry = new THREE.BufferGeometry();
 	twigGeometry.setAttribute('position', new THREE.BufferAttribute(data.twigPosition, 3));
 	twigGeometry.setAttribute('normal', new THREE.BufferAttribute(data.twigNormal, 3));
+	setBounds(twigGeometry, data.twigBounds);
 	const twigMaterial = new THREE.MeshStandardMaterial({ color: '#4a3324', roughness: 0.9 });
 	const twigs = new THREE.Mesh(twigGeometry, twigMaterial);
 	twigs.name = 'BonsaiTwigs';
@@ -389,6 +391,14 @@ async function attachBonsai(pending: ReturnType<typeof startBonsai>) {
 			twigGeometry.dispose();
 		}
 	};
+}
+
+function setBounds(geometry: THREE.BufferGeometry, bounds: Float64Array) {
+	geometry.boundingBox = new THREE.Box3(
+		new THREE.Vector3().fromArray(bounds, 0),
+		new THREE.Vector3().fromArray(bounds, 3)
+	);
+	geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3().fromArray(bounds, 6), bounds[9]);
 }
 
 export type Bonsai = Awaited<ReturnType<typeof createBonsai>>;
