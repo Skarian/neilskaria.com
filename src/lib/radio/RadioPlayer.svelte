@@ -39,7 +39,7 @@
 		<span class="freq">{radio.freq.toFixed(1)}</span>
 		<span class="name">{label}</span>
 		{#if link}
-			<a href={link} target="_blank" rel="noreferrer" aria-label="Open the stream">↗</a>
+			<a href={link} target="_blank" rel="noreferrer" aria-label="Open the stream">↗&#xFE0E;</a>
 		{/if}
 	</p>
 	<button class="skip" onclick={() => player.skip(1)} aria-label="Next station">

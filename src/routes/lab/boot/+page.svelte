@@ -35,7 +35,7 @@
 					{#each menu as item, i (item)}
 						<li class="group flex items-center gap-3">
 							<span class="w-4 text-[#ea76cb] {i === 0 ? '' : 'opacity-0 group-hover:opacity-100'}"
-								>▶</span
+								>▶&#xFE0E;</span
 							>
 							<a href="/lab/boot" class="hover:text-[#8839ef]">{item.toUpperCase()}</a>
 						</li>

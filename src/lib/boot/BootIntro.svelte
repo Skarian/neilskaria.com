@@ -413,10 +413,10 @@
 					aria-label="Brightness"
 					style:--fill="{(lanternLevel / 1.5) * 100}%"
 				/>
-				<span class="end" aria-hidden="true">☀</span>
+				<span class="end" aria-hidden="true">☀&#xFE0E;</span>
 			</label>
 			<div class="actions">
-				<button class="back" onclick={() => engine?.unfocus()}>◀ BACK</button>
+				<button class="back" onclick={() => engine?.unfocus()}>◀&#xFE0E; BACK</button>
 				<button
 					class="back reset"
 					onclick={() => {
@@ -447,7 +447,7 @@
 					: 'Scramble it, then try to solve it.'}
 			</p>
 			<div class="actions">
-				<button class="back" onclick={() => engine?.unfocus()}>◀ BACK</button>
+				<button class="back" onclick={() => engine?.unfocus()}>◀&#xFE0E; BACK</button>
 				<button class="back go" onclick={() => engine?.scrambleCube()} disabled={cube.busy}
 					>SCRAMBLE</button
 				>
@@ -485,7 +485,9 @@
 				<h2>
 					{radioTitle}
 					{#if radioLink}
-						<a href={radioLink} target="_blank" rel="noreferrer" aria-label="Open the stream">↗</a>
+						<a href={radioLink} target="_blank" rel="noreferrer" aria-label="Open the stream"
+							>↗&#xFE0E;</a
+						>
 					{/if}
 				</h2>
 				<p class="status" aria-live="polite">{radioLine}</p>
@@ -550,7 +552,7 @@
 				>
 			</label>
 			<div class="actions">
-				<button class="back" onclick={() => engine?.unfocus()}>◀ BACK</button>
+				<button class="back" onclick={() => engine?.unfocus()}>◀&#xFE0E; BACK</button>
 				<button
 					class="power"
 					role="switch"
@@ -610,10 +612,10 @@
 					}
 				}}
 			>
-				<span aria-hidden="true">◀ TURN ▶</span>
+				<span aria-hidden="true">◀&#xFE0E; TURN ▶&#xFE0E;</span>
 			</div>
 			<div class="actions">
-				<button class="back" onclick={() => engine?.unfocus()}>◀ BACK</button>
+				<button class="back" onclick={() => engine?.unfocus()}>◀&#xFE0E; BACK</button>
 				<button class="back water" onclick={() => engine?.waterBonsai()}>WATER</button>
 				<button class="back reset" onclick={() => engine?.resetBonsai()}>↺ RESET</button>
 			</div>
@@ -623,7 +625,7 @@
 	{#if focused === 'portrait'}
 		<!-- The portrait is just looked at: no panel, only a way back. -->
 		<div class="alone" in:pop={{ delay: 500 }} out:pop={{ duration: 220 }}>
-			<button class="back" onclick={() => engine?.unfocus()}>◀ BACK</button>
+			<button class="back" onclick={() => engine?.unfocus()}>◀&#xFE0E; BACK</button>
 		</div>
 	{/if}
 
