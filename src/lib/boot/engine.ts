@@ -238,6 +238,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	// Load everything up front, so nothing stutters once it's moving. The files are already on their
 	// way (see fetches.ts): the model first, then the pictures, which arrive while the room is built.
 	const files = fetchRoom();
+	// Audio has a native setup cost: give it its own task while the model is downloading.
+	const sounding = breathe().then(() => createBootSound(files.chime, options.muted));
 	const draco = new DRACOLoader().setDecoderPath('/draco/');
 	// (Its decoder comes from those downloads too.)
 	(
@@ -253,7 +255,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	onProgress(0.75);
 	draco.dispose();
 	const growing = growBonsai(gltf.scene, grower);
-	const sounding = createBootSound(files.chime, options.muted);
 	const lighting: Record<string, BakedLighting> = {};
 	const lightmapsIn: Promise<void>[] = [];
 	for (const group of Object.keys(lightmapScales)) {
