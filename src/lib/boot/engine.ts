@@ -407,10 +407,12 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		material.polygonOffsetUnits = -2;
 		stickerMaterials[`${o.getComponent(axis) > 0 ? '+' : '-'}${'xyz'[axis]}` as Face] = material;
 	}
-	const rubiks = createRubiks({
+	await breathe();
+	const rubiks = await createRubiks({
 		size: cubeSize,
 		body: partOf('CubeBody').material as THREE.Material,
-		stickers: stickerMaterials
+		stickers: stickerMaterials,
+		breathe
 	});
 	rubiks.root.position.copy(cubeCentre);
 	rubiks.root.rotation.y = cubeYaw;

@@ -29,13 +29,14 @@ export function decodeMove(text: string): Move | null {
 	};
 }
 
-export function createRubiks(options: {
+export async function createRubiks(options: {
 	// The edge length of the whole cube.
 	size: number;
 	body: THREE.Material;
 	stickers: Record<Face, THREE.Material>;
+	breathe: () => Promise<unknown>;
 }) {
-	const { size, body, stickers } = options;
+	const { size, body, stickers, breathe } = options;
 	// Proportions of the modelled cube (57 mm, with 18.7 mm pieces and 15.6 mm stickers).
 	const step = size / 3;
 	const piece = size * (18.7 / 57);
@@ -51,7 +52,9 @@ export function createRubiks(options: {
 	orbit.add(pivot);
 
 	const bodyGeometry = new RoundedBoxGeometry(piece, piece, piece, 3, size * (1.6 / 57));
+	await breathe();
 	const stickerGeometry = new THREE.ShapeGeometry(roundedSquare(sticker, size * (2.2 / 57)), 4);
+	await breathe();
 	const pieces: THREE.Group[] = [];
 	for (let x = -1; x <= 1; x++)
 		for (let y = -1; y <= 1; y++)
@@ -75,6 +78,8 @@ export function createRubiks(options: {
 				orbit.add(group);
 				pieces.push(group);
 			}
+
+	await breathe();
 
 	// Drawn as a few batches (every body together, each colour's stickers together) rather than 80
 	// separate meshes. The pieces themselves stay as they are, unseen, for turning and picking; each
