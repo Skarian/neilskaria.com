@@ -8,7 +8,6 @@
 import * as THREE from 'three';
 import roots from './assets/bonsai-roots.json';
 import type { BonsaiBuffers, BonsaiInput } from './bonsai-generator';
-import { runStartupSteps, startupYield } from './startup-queue';
 
 const KEY = 'bonsai-shoots';
 // The model's units: props.py works in millimetres, at 0.01 units each (before the tree's own scale).
@@ -30,12 +29,9 @@ export type Shoot = {
 // The clock for the foliage's gentle sway (set each frame by the room).
 export const swayTime = { value: 0 };
 
-// Begin as soon as the model is parsed, while the room's pictures are still arriving.
-export function startBonsai(
-	root: THREE.Object3D,
-	canvas: HTMLCanvasElement,
-	prepared = prepareBonsai(canvas)
-) {
+// Growing the foliage takes a phone a second or more, so it's done in a worker (bonsai.worker.ts),
+// while the room's pictures are still downloading. This sets the tree on its turntable and starts it.
+export function growBonsai(root: THREE.Object3D, worker: Worker) {
 	const wood = root.getObjectByName('BonsaiWood') as THREE.Mesh;
 	const pot = root.getObjectByName('BonsaiPot') as THREE.Mesh;
 	root.updateMatrixWorld(true);
@@ -68,121 +64,37 @@ export function startBonsai(
 		.multiply(wood.matrixWorld)
 		.multiply(new THREE.Matrix4().set(MM, 0, 0, 0, 0, 0, MM, 0, 0, -MM, 0, 0, 0, 0, 0, 1));
 	const input: BonsaiInput = { roots: roots.roots, seed: 11, fromModel: fromModel.toArray() };
-	const buffers = growInWorker(input, prepared);
-	void buffers.catch(() => {});
-	return { ...prepared, turntable, buffers };
-}
-
-// Fetch and parse the worker while the model downloads, before pictures fill the connection queue.
-export function prepareBonsai(canvas: HTMLCanvasElement) {
-	const controller = new AbortController();
-	const { signal } = controller;
-	const cancel = () => controller.abort();
-	const observer = new MutationObserver(() => {
-		if (!canvas.isConnected) cancel();
-	});
-	observer.observe(document, { childList: true, subtree: true });
-	addEventListener('pagehide', cancel, { once: true });
-	const release = () => {
-		observer.disconnect();
-		removeEventListener('pagehide', cancel);
-	};
-	signal.addEventListener('abort', release, { once: true });
-	if (!canvas.isConnected) cancel();
-	let worker: Worker | undefined;
-	let send: (input: BonsaiInput) => void = () => {};
-	const buffers = new Promise<BonsaiBuffers>((resolve, reject) => {
-		const finish = () => {
-			worker?.terminate();
-			signal.removeEventListener('abort', abort);
+	const grown = new Promise<BonsaiBuffers>((resolve) => {
+		worker.onmessage = (event: MessageEvent<BonsaiBuffers>) => resolve(event.data);
+		// (Should the worker fail, the tree is grown here instead, holding the page up as it once did.)
+		worker.onerror = (event) => {
+			event.preventDefault();
+			void import('./bonsai-generator').then(({ generateBonsai }) =>
+				resolve(generateBonsai(input))
+			);
 		};
-		const abort = () => {
-			finish();
-			reject(signal.reason);
-		};
-		try {
-			signal.throwIfAborted();
-			worker = new Worker(new URL('./bonsai.worker.ts', import.meta.url), { type: 'module' });
-			signal.addEventListener('abort', abort, { once: true });
-			worker.onmessage = (event: MessageEvent<BonsaiBuffers>) => {
-				finish();
-				if (signal.aborted) reject(signal.reason);
-				else resolve(event.data);
-			};
-			worker.onerror = (event) => {
-				event.preventDefault();
-				finish();
-				reject(new Error('The bonsai worker failed'));
-			};
-			worker.onmessageerror = () => {
-				finish();
-				reject(new Error('The bonsai buffers could not be read'));
-			};
-			send = (input) => {
-				try {
-					signal.throwIfAborted();
-					worker!.postMessage(input);
-				} catch (error) {
-					finish();
-					reject(error);
-				}
-			};
-		} catch (error) {
-			finish();
-			reject(error);
-		}
+		worker.postMessage(input);
 	});
-	// A failure or cancellation can arrive before the model has supplied its transforms.
-	void buffers.catch(() => {});
-	return { buffers, send: (input: BonsaiInput) => send(input), signal, release, cancel };
+	return { turntable, grown };
 }
 
-async function growInWorker(input: BonsaiInput, prepared: ReturnType<typeof prepareBonsai>) {
-	const { signal } = prepared;
-	try {
-		prepared.send(input);
-		return await prepared.buffers;
-	} catch {
-		signal.throwIfAborted();
-		// A blocked or unavailable worker still leaves a tree, with time for input between chunks.
-		await startupYield();
-		const { generateBonsai } = await import('./bonsai-generator');
-		return runStartupSteps(generateBonsai(input), signal);
-	}
-}
-
-export async function createBonsai(pending: ReturnType<typeof startBonsai>) {
-	try {
-		return await attachBonsai(pending);
-	} finally {
-		pending.release();
-	}
-}
-
-async function attachBonsai(pending: ReturnType<typeof startBonsai>) {
-	const { turntable, signal } = pending;
-	const data = await pending.buffers;
-	signal.throwIfAborted();
-	await startupYield();
-	signal.throwIfAborted();
+export async function createBonsai({ turntable, grown }: ReturnType<typeof growBonsai>) {
+	const data = await grown;
+	// Each shoot's points, for picking and cutting.
 	const shoots: Shoot[] = [];
-	function* unpack(): Generator<void, void> {
-		for (let s = 0; s < data.neat.length; s++) {
-			const start = data.offsets[s];
-			const end = data.offsets[s + 1];
-			const nodes: THREE.Vector3[] = [];
-			for (let n = start; n < end; n++)
-				nodes.push(new THREE.Vector3().fromArray(data.nodes, n * 3));
-			shoots.push({
-				hub: new THREE.Vector3().fromArray(data.hubs, s * 3),
-				nodes,
-				neat: data.neat[s],
-				triangles: Array.from(data.triangles.subarray(start + s, end + s + 1))
-			});
-			yield;
-		}
+	for (let s = 0; s < data.neat.length; s++) {
+		const start = data.offsets[s];
+		const end = data.offsets[s + 1];
+		const nodes: THREE.Vector3[] = [];
+		for (let n = start; n < end; n++) nodes.push(new THREE.Vector3().fromArray(data.nodes, n * 3));
+		shoots.push({
+			hub: new THREE.Vector3().fromArray(data.hubs, s * 3),
+			nodes,
+			neat: data.neat[s],
+			triangles: Array.from(data.triangles.subarray(start + s, end + s + 1))
+		});
 	}
-	await runStartupSteps(unpack(), signal);
+
 	// Lit live, so they can turn: the same colours and textures, now under the room's light.
 	const materials: THREE.MeshStandardMaterial[] = [];
 	turntable.traverse((o) => {
@@ -198,10 +110,11 @@ async function attachBonsai(pending: ReturnType<typeof startBonsai>) {
 		materials.push(material);
 	});
 
+	// How far each shoot reaches, in nodes: one texel each, read by the foliage's shader. And each
+	// shoot's own pace of growth.
+	const { lengths, pace } = data;
 	const count = shoots.length;
 	const rows = Math.ceil(count / WIDTH);
-	const lengths = data.lengths;
-	const pace = data.pace;
 	const texture = new THREE.DataTexture(lengths, WIDTH, rows, THREE.RedFormat, THREE.FloatType);
 	texture.needsUpdate = true;
 	const lengthsUniform = { value: texture };
@@ -393,47 +306,8 @@ async function attachBonsai(pending: ReturnType<typeof startBonsai>) {
 	};
 }
 
-// Put the tree's buffers on the GPU while the pictures download, one attribute at a time.
-// The little offscreen pass draws no vertices and leaves the shared attributes for the room.
-export async function uploadBonsai(
-	renderer: THREE.WebGLRenderer,
-	bonsai: Bonsai,
-	canvas: HTMLCanvasElement
-) {
-	const scene = new THREE.Scene();
-	const camera = new THREE.Camera();
-	const geometry = new THREE.BufferGeometry();
-	geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1);
-	geometry.setDrawRange(0, 0);
-	const material = new THREE.MeshBasicMaterial({ toneMapped: false });
-	material.visible = false;
-	const mesh = new THREE.Mesh(geometry, material);
-	mesh.frustumCulled = false;
-	scene.add(mesh);
-	const target = new THREE.WebGLRenderTarget(1, 1);
-	const previous = renderer.getRenderTarget();
-	try {
-		for (const name of ['BonsaiShoots', 'BonsaiTwigs']) {
-			const tree = bonsai.turntable.getObjectByName(name) as THREE.Mesh;
-			for (const attribute of Object.values(tree.geometry.attributes)) {
-				if (!canvas.isConnected) return;
-				geometry.setAttribute('position', attribute);
-				renderer.setRenderTarget(target);
-				renderer.render(scene, camera);
-				renderer.setRenderTarget(previous);
-				await startupYield();
-			}
-		}
-	} finally {
-		// Disposing this geometry must not delete the buffers now shared with the real tree.
-		geometry.deleteAttribute('position');
-		geometry.dispose();
-		material.dispose();
-		renderer.setRenderTarget(previous);
-		target.dispose();
-	}
-}
-
+// The bounds three.js would otherwise work out on the first frame, by going through every vertex
+// (worked out in the worker instead: a box, then a sphere around its centre).
 function setBounds(geometry: THREE.BufferGeometry, bounds: Float64Array) {
 	geometry.boundingBox = new THREE.Box3(
 		new THREE.Vector3().fromArray(bounds, 0),

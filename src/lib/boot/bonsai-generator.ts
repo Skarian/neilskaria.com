@@ -1,5 +1,5 @@
-// The tree's recipe, shared by the worker and its sliced fallback. Only maths lives here;
-// the room wraps the finished arrays in geometry once they arrive.
+// How the bonsai's foliage is grown (see bonsai.ts): run in a worker, so it uses only three.js's
+// maths, and hands back plain arrays for the room to make into geometry.
 
 import { Vector3 } from 'three/src/math/Vector3.js';
 import { Matrix3 } from 'three/src/math/Matrix3.js';
@@ -8,6 +8,8 @@ import * as MathUtils from 'three/src/math/MathUtils.js';
 import { CatmullRomCurve3 } from 'three/src/extras/curves/CatmullRomCurve3.js';
 import { QuadraticBezierCurve3 } from 'three/src/extras/curves/QuadraticBezierCurve3.js';
 
+// The foliage pads, as in props.py: centre and half-sizes in millimetres (x right, y back, z up), and
+// how many shoots fill each.
 const PADS: { centre: [number, number, number]; size: [number, number, number]; shoots: number }[] =
 	[
 		{ centre: [19, 0, 214], size: [78, 55, 38], shoots: 320 }, // the crown
@@ -25,6 +27,8 @@ const GREENS = [
 	[0.07, 0.2, 0.15]
 ];
 const NEW_GROWTH = [0.2, 0.4, 0.12];
+// The width of the shoot-lengths texture (as in bonsai.ts).
+const WIDTH = 64;
 
 export type BonsaiInput = { roots: number[][]; seed: number; fromModel: number[] };
 
@@ -51,10 +55,9 @@ export type BonsaiBuffers = {
 	triangles: Uint32Array;
 };
 
-export function* generateBonsai(input: BonsaiInput): Generator<void, BonsaiBuffers> {
+export function generateBonsai(input: BonsaiInput): BonsaiBuffers {
 	const random = mulberry32(input.seed);
 	const rand = (a = 0, b = 1) => a + (b - a) * random();
-	const WIDTH = 64;
 	const fromModel = new Matrix4().fromArray(input.fromModel);
 	const normalFromModel = new Matrix3().getNormalMatrix(fromModel);
 	const local = (v: Vector3) => v.clone().applyMatrix4(fromModel);
@@ -130,7 +133,6 @@ export function* generateBonsai(input: BonsaiInput): Generator<void, BonsaiBuffe
 			2.6,
 			1.5
 		);
-		yield;
 		const hubs: Vector3[] = [];
 		const hubCount = MathUtils.clamp(Math.round(pad.shoots / 22), 3, 8);
 		for (let h = 0; h < hubCount; h++) {
@@ -150,7 +152,6 @@ export function* generateBonsai(input: BonsaiInput): Generator<void, BonsaiBuffe
 				0.7
 			);
 			hubs.push(hub);
-			yield;
 		}
 
 		for (let i = 0; i < pad.shoots; i++) {
@@ -204,7 +205,6 @@ export function* generateBonsai(input: BonsaiInput): Generator<void, BonsaiBuffe
 				const depth = Math.min(1, e.length());
 				let shade = grown ? 1 : 0.35 + 0.65 * MathUtils.smoothstep(depth, 0.2, 1);
 				if (!grown && p.z < c.z) shade *= 0.75;
-				// These colours are already linear RGB; keep the same interpolation and shade.
 				const colour = green.slice();
 				if (grown) {
 					const amount = Math.min(1, (k - neat + 1) / 3);
@@ -264,7 +264,6 @@ export function* generateBonsai(input: BonsaiInput): Generator<void, BonsaiBuffe
 				neat,
 				triangles
 			});
-			yield;
 		}
 	}
 
@@ -286,6 +285,8 @@ export function* generateBonsai(input: BonsaiInput): Generator<void, BonsaiBuffe
 		pace[s] = 0.5 + 0.6 * random() + 0.5 * height;
 	}
 
+	// The shoots themselves, flattened: hubs and nodes as doubles, so picking and cutting see exactly
+	// the points they always did.
 	const hubs = new Float64Array(count * 3);
 	const neat = new Uint16Array(count);
 	const offsets = new Uint32Array(count + 1);
@@ -298,85 +299,52 @@ export function* generateBonsai(input: BonsaiInput): Generator<void, BonsaiBuffe
 		offsets[s] = nodes.length / 3;
 		for (const node of shoot.nodes) nodes.push(node.x, node.y, node.z);
 		triangles.push(...shoot.triangles);
-		yield;
 	}
 	offsets[count] = nodes.length / 3;
-	const position = yield* pack(leaf.position, new Float32Array(leaf.position.length));
-	const twigPosition = yield* pack(twig.position, new Float32Array(twig.position.length));
+	const position = Float32Array.from(leaf.position);
+	const twigPosition = Float32Array.from(twig.position);
 	return {
 		position,
-		normal: yield* pack(leaf.normal, new Int8Array(leaf.normal.length), 127),
-		color: yield* pack(leaf.color, new Float32Array(leaf.color.length)),
-		shootId: yield* pack(leaf.shoot, new Uint16Array(leaf.shoot.length)),
-		node: yield* pack(leaf.node, new Uint8Array(leaf.node.length)),
-		anchor: yield* pack(leaf.anchor, new Float32Array(leaf.anchor.length)),
+		// (Kept compact on the GPU: normals in a byte each, ids as small whole numbers; a third of a
+		// degree off at most for the normals, the ids exact.)
+		normal: Int8Array.from(leaf.normal, (v) => Math.round(v * 127)),
+		color: Float32Array.from(leaf.color),
+		shootId: Uint16Array.from(leaf.shoot),
+		node: Uint8Array.from(leaf.node),
+		anchor: Float32Array.from(leaf.anchor),
 		twigPosition,
-		twigNormal: yield* pack(twig.normal, new Float32Array(twig.normal.length)),
+		twigNormal: Float32Array.from(twig.normal),
 		lengths,
 		pace,
-		foliageBounds: yield* bounds(position),
-		twigBounds: yield* bounds(twigPosition),
+		foliageBounds: bounds(position),
+		twigBounds: bounds(twigPosition),
 		hubs,
-		nodes: yield* pack(nodes, new Float64Array(nodes.length)),
+		nodes: Float64Array.from(nodes),
 		neat,
 		offsets,
-		triangles: yield* pack(triangles, new Uint32Array(triangles.length))
+		triangles: Uint32Array.from(triangles)
 	};
 }
 
-// Conversion is chunked too: the fallback must never convert all the needles in one task.
-function* pack<
-	T extends Float32Array | Float64Array | Int8Array | Uint8Array | Uint16Array | Uint32Array
->(source: number[], target: T, normalScale?: number): Generator<void, T> {
-	for (let start = 0; start < source.length; start += 8192) {
-		const end = Math.min(start + 8192, source.length);
-		for (let i = start; i < end; i++)
-			target[i] = normalScale ? Math.round(source[i] * normalScale) : source[i];
-		yield;
-	}
-	return target;
-}
-
-// The renderer needs these on its first frame. Scan the packed positions here, rather than
-// making it walk every needle on the page thread; the fallback shares the same short chunks.
-function* bounds(position: Float32Array): Generator<void, Float64Array> {
-	const result = new Float64Array([
-		Infinity,
-		Infinity,
-		Infinity,
-		-Infinity,
-		-Infinity,
-		-Infinity,
-		0,
-		0,
-		0,
-		0
-	]);
-	for (let start = 0; start < position.length; start += 8192 * 3) {
-		const end = Math.min(start + 8192 * 3, position.length);
-		for (let i = start; i < end; i += 3) {
-			for (let channel = 0; channel < 3; channel++) {
-				result[channel] = Math.min(result[channel], position[i + channel]);
-				result[channel + 3] = Math.max(result[channel + 3], position[i + channel]);
-			}
+// A box around the positions, then a sphere around its centre, as three.js works them out:
+// min x, y, z, max x, y, z, centre x, y, z, radius.
+function bounds(position: Float32Array) {
+	const min = [Infinity, Infinity, Infinity];
+	const max = [-Infinity, -Infinity, -Infinity];
+	for (let i = 0; i < position.length; i += 3)
+		for (let c = 0; c < 3; c++) {
+			min[c] = Math.min(min[c], position[i + c]);
+			max[c] = Math.max(max[c], position[i + c]);
 		}
-		yield;
+	const centre = [0, 1, 2].map((c) => (min[c] + max[c]) * 0.5);
+	let radius = 0;
+	for (let i = 0; i < position.length; i += 3) {
+		const x = position[i] - centre[0];
+		const y = position[i + 1] - centre[1];
+		const z = position[i + 2] - centre[2];
+		radius = Math.max(radius, x * x + y * y + z * z);
 	}
-	for (let channel = 0; channel < 3; channel++)
-		result[channel + 6] = (result[channel] + result[channel + 3]) * 0.5;
-	let radiusSquared = 0;
-	for (let start = 0; start < position.length; start += 8192 * 3) {
-		const end = Math.min(start + 8192 * 3, position.length);
-		for (let i = start; i < end; i += 3) {
-			const x = position[i] - result[6];
-			const y = position[i + 1] - result[7];
-			const z = position[i + 2] - result[8];
-			radiusSquared = Math.max(radiusSquared, x * x + y * y + z * z);
-		}
-		yield;
-	}
-	result[9] = Math.sqrt(radiusSquared);
-	return result;
+	return new Float64Array([...min, ...max, ...centre, Math.sqrt(radius)]);
 }
 
 function weighted(x: number, weights: number[]) {
