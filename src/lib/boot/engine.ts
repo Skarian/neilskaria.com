@@ -133,6 +133,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	renderer.setSize(innerWidth, innerHeight, false);
 	renderer.toneMapping = THREE.ACESFilmicToneMapping;
 	renderer.toneMappingExposure = 1.1;
+	await breathe();
 
 	const scene = new THREE.Scene();
 	scene.background = new THREE.Color('#120f0c');
