@@ -70,7 +70,8 @@
 
 	.scanlines {
 		position: absolute;
-		inset: 0;
+		/* One extra period above the screen, so moving the layer never leaves a gap. */
+		inset: -3px 0 0;
 		background: repeating-linear-gradient(0deg, rgb(20 12 40 / 0.07) 0 1px, transparent 1px 3px);
 		mix-blend-mode: multiply;
 		animation: roll 8s linear infinite;
@@ -104,7 +105,7 @@
 
 	@keyframes roll {
 		to {
-			background-position: 0 3px;
+			transform: translateY(3px);
 		}
 	}
 
