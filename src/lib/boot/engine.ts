@@ -808,6 +808,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	// 1-pixel target. Its material is hidden: nothing is drawn, and no shader is needed.)
 	async function upload(attributes: (THREE.BufferAttribute | THREE.InterleavedBufferAttribute)[]) {
 		const geometry = new THREE.BufferGeometry();
+		// Nothing is drawn, so sorting needs no scan of the attribute for bounds.
+		geometry.boundingSphere = new THREE.Sphere();
 		const stand = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ visible: false }));
 		stand.frustumCulled = false;
 		const target = new THREE.WebGLRenderTarget(1, 1);
