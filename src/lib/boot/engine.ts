@@ -427,11 +427,10 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	const bonsai = await createBonsai(growing, breathe);
 	grower.terminate();
 	// Its buffers are big: they go to the GPU now, one at a time, while the pictures are still coming.
-	await upload(
-		['BonsaiShoots', 'BonsaiTwigs'].flatMap((name) =>
-			Object.values((bonsai.turntable.getObjectByName(name) as THREE.Mesh).geometry.attributes)
-		)
+	const foliage = ['BonsaiShoots', 'BonsaiTwigs'].flatMap((name) =>
+		Object.values((bonsai.turntable.getObjectByName(name) as THREE.Mesh).geometry.attributes)
 	);
+	await upload(foliage);
 	bonsai.load();
 	live.push(...bonsai.materials);
 	// Cut clumps fall onto the slate (or the table) and shrink away; water drops fall through the tree.
@@ -737,7 +736,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	// Small buffers warm with their meshes; only big uploads need separate tasks.
 	await upload(
 		[...new Set(shapes.flatMap((geometry) => Object.values(geometry.attributes)))].filter(
-			(attribute) => attribute.array.byteLength > 65536
+			(attribute) => attribute.array.byteLength > 65536 && !foliage.includes(attribute)
 		)
 	);
 
