@@ -721,6 +721,21 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			envMap.needsUpdate = true;
 		});
 
+	const drawn: (THREE.Mesh | THREE.Points)[] = [];
+	scene.traverse((object) => {
+		if (object instanceof THREE.Mesh || object instanceof THREE.Points) drawn.push(object);
+	});
+	// Shared shapes and buffers need preparing only once, before any real draw.
+	const shapes = [...new Set(drawn.map((mesh) => mesh.geometry))];
+	for (const geometry of shapes) {
+		if (!geometry.boundingSphere) {
+			if (!geometry.boundingBox) geometry.computeBoundingBox();
+			geometry.boundingSphere = geometry.boundingBox!.getBoundingSphere(new THREE.Sphere());
+		}
+		await breathe();
+	}
+	await upload([...new Set(shapes.flatMap((geometry) => Object.values(geometry.attributes)))]);
+
 	// Everything from here on needs the room's pictures.
 	await Promise.all([...lightmapsIn, portraitIn, envIn]);
 	onProgress(0.9);
@@ -766,6 +781,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	});
 	const motes = new THREE.Points(moteGeometry, moteMaterial);
 	scene.add(motes);
+	drawn.push(motes);
 
 	camera.position.copy(CAMERA_NEAR);
 	camera.lookAt(FLOAT);
@@ -779,7 +795,15 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	await document.fonts.ready;
 	// Shaders for everything, and the pictures onto the GPU, a piece at a time, then one frame drawn
 	// behind the loading screen: so the first real frame, and the first tap, don't stall.
-	await renderer.compileAsync(scene, camera);
+	// Submit a few shaders at a time; their GPU compilation still runs in parallel.
+	const compiling: Promise<unknown>[] = [];
+	const batch = new THREE.Scene();
+	for (let i = 0; i < drawn.length; i += 4) {
+		batch.children = drawn.slice(i, i + 4);
+		compiling.push(renderer.compileAsync(batch, camera, scene));
+		await breathe();
+	}
+	await Promise.all(compiling);
 	await breathe();
 	{
 		// The variants that only appear later: the console's lit screen, a cut clump of foliage.
@@ -789,17 +813,27 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		extras.add(new THREE.Mesh(screen.geometry, lit));
 		const clump = bonsai.clump(0, 0);
 		if (clump) extras.add(clump);
-		renderer.compile(extras, camera, scene);
+		await renderer.compileAsync(extras, camera, scene);
+		await breathe();
 		clump?.geometry.dispose();
 	}
 	for (const group of Object.values(lighting)) {
 		renderer.initTexture(group.base);
+		await breathe();
 		renderer.initTexture(group.lamp);
 		await breathe();
 	}
 	renderer.initTexture(envMap);
+	await breathe();
 	renderer.initTexture(portraitArt);
 	await breathe();
+	// First-use program reflection and uploads happen behind the loader, a few meshes at a time.
+	scene.updateMatrixWorld(true);
+	for (let i = 0; i < drawn.length; i += 2) {
+		batch.children = [key, fill, lanternLight, ...drawn.slice(i, i + 2)];
+		renderer.render(batch, camera);
+		await breathe();
+	}
 	renderer.render(scene, camera);
 	await breathe();
 
