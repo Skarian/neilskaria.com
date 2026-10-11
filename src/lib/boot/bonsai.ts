@@ -78,11 +78,22 @@ export function growBonsai(root: THREE.Object3D, worker: Worker) {
 	return { turntable, grown };
 }
 
-export async function createBonsai({ turntable, grown }: ReturnType<typeof growBonsai>) {
+// Makes the tree from what the worker grew, a few milliseconds at a time (`breathe` lets the page
+// get on with anything else in between).
+export async function createBonsai(
+	{ turntable, grown }: ReturnType<typeof growBonsai>,
+	breathe: () => Promise<unknown>
+) {
 	const data = await grown;
+	await breathe();
 	// Each shoot's points, for picking and cutting.
 	const shoots: Shoot[] = [];
+	let since = performance.now();
 	for (let s = 0; s < data.neat.length; s++) {
+		if (performance.now() - since > 4) {
+			await breathe();
+			since = performance.now();
+		}
 		const start = data.offsets[s];
 		const end = data.offsets[s + 1];
 		const nodes: THREE.Vector3[] = [];
@@ -94,6 +105,7 @@ export async function createBonsai({ turntable, grown }: ReturnType<typeof growB
 			triangles: Array.from(data.triangles.subarray(start + s, end + s + 1))
 		});
 	}
+	await breathe();
 
 	// Lit live, so they can turn: the same colours and textures, now under the room's light.
 	const materials: THREE.MeshStandardMaterial[] = [];

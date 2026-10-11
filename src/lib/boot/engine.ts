@@ -419,7 +419,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 
 	// The bonsai: its foliage grown in the worker, on a turntable, lit live so it can turn (see
 	// bonsai.ts).
-	const bonsai = await createBonsai(growing);
+	const bonsai = await createBonsai(growing, breathe);
 	grower.terminate();
 	// Its buffers are big: they go to the GPU now, one at a time, while the pictures are still coming.
 	await upload(
