@@ -1236,11 +1236,29 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	let freeAbove = 0.52;
 	// And on wider screens, how much is left of it.
 	let freeLeft = 0.58;
+	const fittedProjection = new THREE.Matrix4();
+	let fittedWidth = 0;
+	let fittedHeight = 0;
+	function rememberFit() {
+		fittedProjection.copy(camera.projectionMatrix);
+		fittedWidth = innerWidth;
+		fittedHeight = innerHeight;
+	}
 	function setFree(side: 'above' | 'left', fraction: number) {
-		if (side === 'above') freeAbove = THREE.MathUtils.clamp(fraction, 0.3, 0.9);
-		else freeLeft = THREE.MathUtils.clamp(fraction, 0.4, 0.9);
+		const next = THREE.MathUtils.clamp(fraction, side === 'above' ? 0.3 : 0.4, 0.9);
+		const unchanged = next === (side === 'above' ? freeAbove : freeLeft);
+		if (side === 'above') freeAbove = next;
+		else freeLeft = next;
+		if (
+			unchanged &&
+			fittedProjection.equals(camera.projectionMatrix) &&
+			fittedWidth === innerWidth &&
+			fittedHeight === innerHeight
+		)
+			return;
 		if (!focused) return;
 		const v = viewOf(focused);
+		rememberFit();
 		gsap.to(focusView.eye, {
 			x: v.eye.x,
 			y: v.eye.y,
@@ -1268,6 +1286,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 			emitCube();
 		}
 		const v = viewOf(thing);
+		rememberFit();
 		focusView.eye.copy(v.eye);
 		focusView.target.copy(v.target);
 		gsap.killTweensOf(focusBlend);

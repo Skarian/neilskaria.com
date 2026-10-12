@@ -5,14 +5,22 @@
 	import { fetchRoom } from './fetches';
 	import { room } from './room.svelte';
 
+	function popFrame(t: number) {
+		const spring = 1 - Math.pow(1 - t, 3) + Math.sin(t * Math.PI) * 0.12;
+		return {
+			opacity: Math.min(1, t * 2),
+			transform: `scale(${0.6 + 0.4 * spring}) rotate(${(1 - t) * -4}deg)`
+		};
+	}
+
 	// Panels pop in like a game dialog: from small and tilted, overshooting a touch.
 	function pop(_node: Element, { delay = 0, duration = 520 } = {}) {
 		return {
 			delay,
 			duration,
 			css: (t: number) => {
-				const spring = 1 - Math.pow(1 - t, 3) + Math.sin(t * Math.PI) * 0.12;
-				return `opacity: ${Math.min(1, t * 2)}; transform: scale(${0.6 + 0.4 * spring}) rotate(${(1 - t) * -4}deg);`;
+				const frame = popFrame(t);
+				return `opacity: ${frame.opacity}; transform: ${frame.transform};`;
 			}
 		};
 	}
@@ -50,6 +58,77 @@
 	let progress = $state(0);
 	let pressed = $state(false);
 	let focused = $state<Thing | null>(null);
+	let lanternPrepared = $state(false);
+	let radioPrepared = $state(false);
+	let lanternPanel = $state<HTMLElement>();
+	let radioPanel = $state<HTMLElement>();
+	let preparingPanels = false;
+	let disposed = false;
+
+	// Prepare one panel per yielded task. The room does not wait for these tasks.
+	// A selection that arrives first mounts the same panel through the normal path.
+	async function preparePanels() {
+		if (preparingPanels) return;
+		preparingPanels = true;
+		const scheduler = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler;
+		const breathe = () =>
+			scheduler?.yield ? scheduler.yield() : new Promise((resolve) => setTimeout(resolve, 0));
+		await breathe();
+		if (disposed) return;
+		lanternPrepared = true;
+		await tick();
+		lanternPanel?.getBoundingClientRect();
+		await breathe();
+		if (disposed) return;
+		radioPrepared = true;
+		await tick();
+		radioPanel?.getBoundingClientRect();
+	}
+
+	// Persistent panels replay the same pop keyframes and child entries on every selection.
+	function preparedPanel(node: HTMLElement, selected: boolean) {
+		let animation: Animation | undefined;
+		let from = 0;
+		let to = 0;
+		let active = false;
+		node.style.visibility = 'hidden';
+		node.dataset.panelHidden = '';
+		function update(selected: boolean) {
+			if (selected === active) return;
+			active = selected;
+			const replaying = active && node.style.visibility === 'visible';
+			const progress = Number(animation?.effect?.getComputedTiming().progress ?? 0);
+			from = animation ? from + (to - from) * progress : active ? 0 : 1;
+			animation?.cancel();
+			if (replaying)
+				for (const child of node.getAnimations({ subtree: true })) {
+					if (child instanceof CSSAnimation) child.currentTime = 0;
+				}
+			to = active ? 1 : 0;
+			if (active) {
+				node.style.visibility = 'visible';
+				delete node.dataset.panelHidden;
+			}
+			const duration = active ? 520 : 220;
+			const steps = Math.max(1, Math.ceil(duration / (1000 / 60)));
+			const frames = Array.from({ length: steps + 1 }, (_, i) =>
+				popFrame(from + ((to - from) * i) / steps)
+			);
+			const next = node.animate(frames, { delay: active ? 350 : 0, duration, fill: 'both' });
+			animation = next;
+			next.onfinish = () => {
+				if (animation !== next) return;
+				if (!active) {
+					node.style.visibility = 'hidden';
+					node.dataset.panelHidden = '';
+				}
+				next.cancel();
+				animation = undefined;
+			};
+		}
+		update(selected);
+		return { update, destroy: () => animation?.cancel() };
+	}
 
 	// The lantern's presets: warm whites to colours. Brightness runs from off to a little over full.
 	const LANTERN_COLORS = [
@@ -90,9 +169,18 @@
 	// so it's told how much that is whenever the panel opens or changes size.
 	$effect(() => {
 		if (!focused) return;
+		const thing = focused;
+		let alive = true;
+		const selectedPanel = () =>
+			thing === 'lantern'
+				? lanternPanel
+				: thing === 'clock'
+					? radioPanel
+					: layer?.querySelector<HTMLElement>('.panel:not([inert])');
 		let observer: ResizeObserver | undefined;
 		const report = () => {
-			const panel = layer?.querySelector<HTMLElement>('.panel');
+			if (!alive || focused !== thing) return;
+			const panel = selectedPanel();
 			if (!panel) return;
 			const box = panel.getBoundingClientRect();
 			if (innerWidth <= 640 || innerWidth <= innerHeight)
@@ -100,7 +188,8 @@
 			else engine?.setFree('left', box.left / innerWidth);
 		};
 		void tick().then(() => {
-			const panel = layer?.querySelector<HTMLElement>('.panel');
+			if (!alive || focused !== thing) return;
+			const panel = selectedPanel();
 			if (!panel) return;
 			report();
 			observer = new ResizeObserver(report);
@@ -108,6 +197,7 @@
 		});
 		addEventListener('resize', report);
 		return () => {
+			alive = false;
 			observer?.disconnect();
 			removeEventListener('resize', report);
 		};
@@ -198,7 +288,7 @@
 	async function load(startIn: 'room' | 'site') {
 		fetchRoom();
 		const { createRoom } = await import('./engine');
-		engine = await createRoom({
+		const loading = createRoom({
 			canvas: canvas!,
 			layer: layer!,
 			background,
@@ -221,11 +311,15 @@
 				}
 				if (focused === 'clock' && thing !== 'clock' && radio.on && !player.station())
 					player.setOn(false);
+				if (thing === 'lantern') lanternPrepared = true;
+				if (thing === 'clock') radioPrepared = true;
 				focused = thing;
 			},
 			onCube: (state) => (cube = state),
 			onBonsai: (state) => (bonsai = state)
 		});
+		void preparePanels();
+		engine = await loading;
 		engine.setLantern(lanternColor, lanternLevel);
 		engine.setRadio({ on: radio.on, freq: radio.freq });
 		if (skipped) engine.skipToSite();
@@ -338,6 +432,7 @@
 			}
 		}
 		return () => {
+			disposed = true;
 			engine?.dispose();
 			room.ready = false;
 		};
@@ -379,8 +474,16 @@
 		</div>
 	{/if}
 
-	{#if focused === 'lantern'}
-		<aside class="panel" aria-label="Lantern" in:pop={{ delay: 350 }} out:pop={{ duration: 220 }}>
+	{#if lanternPrepared || focused === 'lantern'}
+		<aside
+			class="panel"
+			aria-label="Lantern"
+			bind:this={lanternPanel}
+			data-panel-hidden
+			inert={focused !== 'lantern'}
+			aria-hidden={focused !== 'lantern'}
+			use:preparedPanel={focused === 'lantern'}
+		>
 			<p class="ribbon">LANTERN</p>
 			<h2>Pick a light</h2>
 			<div class="swatches" role="radiogroup" aria-label="Colour">
@@ -473,12 +576,15 @@
 		</aside>
 	{/if}
 
-	{#if focused === 'clock'}
+	{#if radioPrepared || focused === 'clock'}
 		<aside
 			class="panel radio-panel"
 			aria-label="Clock radio"
-			in:pop={{ delay: 350 }}
-			out:pop={{ duration: 220 }}
+			bind:this={radioPanel}
+			data-panel-hidden
+			inert={focused !== 'clock'}
+			aria-hidden={focused !== 'clock'}
+			use:preparedPanel={focused === 'clock'}
 		>
 			<p class="ribbon radio-ribbon">RADIO</p>
 			<div class="station" data-status={radio.status}>
@@ -662,6 +768,15 @@
 </div>
 
 <style>
+	.panel[data-panel-hidden] .swatches button,
+	.panel[data-panel-hidden] .gem,
+	.panel[data-panel-hidden] .presets button,
+	.panel[data-panel-hidden] .swatches button::after,
+	.panel[data-panel-hidden] .station .status,
+	.panel[data-panel-hidden] .freq.on {
+		animation: none;
+	}
+
 	.room-layer {
 		display: none;
 		position: fixed;
