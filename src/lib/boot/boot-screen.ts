@@ -26,15 +26,110 @@ const LINE_SIZE = 0.11;
 const LINE_MAX_WIDTH = 0.6;
 const LINE_CENTRE_Y = 0.74;
 
-export function drawBootScreen(ctx: CanvasRenderingContext2D, t: number, endColor: string) {
+type Letter = { image: HTMLCanvasElement; x: number; y: number; width: number };
+type Prepared = {
+	size: number;
+	letters: string[];
+	slots: number[];
+	glyphs: Map<string, Letter>;
+	line: Letter;
+	lineSize: number;
+	scratch: CanvasRenderingContext2D;
+};
+
+// Rasterize at the largest arrival scale. The animation keeps its original text metrics and
+// origins, including the italic overhang, rather than treating each letter as an equal-size tile.
+export async function prepareBootScreen(
+	ctx: CanvasRenderingContext2D,
+	breathe: () => Promise<unknown>
+) {
+	const { width: w, height: h } = ctx.canvas;
+	ctx.textBaseline = 'middle';
+	ctx.textAlign = 'left';
+	let size = h * WORD_SIZE;
+	ctx.font = wordFont(size);
+	size *= Math.min(1, (w * WORD_MAX_WIDTH) / ctx.measureText(WORDMARK).width);
+	ctx.font = wordFont(size);
+	const letters = [...WORDMARK];
+	const slots: number[] = [];
+	let x = -ctx.measureText(WORDMARK).width / 2;
+	for (const letter of letters) {
+		const width = ctx.measureText(letter).width;
+		slots.push(x + width / 2);
+		x += width;
+	}
+	const glyphs = new Map<string, Letter>();
+	for (const letter of new Set(letters.filter((letter) => letter !== ' '))) {
+		glyphs.set(letter, paint(letter, wordFont(size), '#fff', 5));
+		await breathe();
+	}
+	let lineSize = h * LINE_SIZE;
+	ctx.font = lineFont(lineSize);
+	lineSize *= Math.min(1, (w * LINE_MAX_WIDTH) / ctx.measureText(LINE).width);
+	ctx.font = lineFont(lineSize);
+	const line = paint(
+		LINE,
+		lineFont(lineSize),
+		rgb(MAGENTA),
+		1,
+		(w - ctx.measureText(LINE).width) / 2,
+		h * LINE_CENTRE_Y
+	);
+	const scratchCanvas = document.createElement('canvas');
+	scratchCanvas.width = Math.max(...[...glyphs.values()].map((g) => g.image.width));
+	scratchCanvas.height = Math.max(...[...glyphs.values()].map((g) => g.image.height));
+	const scratch = scratchCanvas.getContext('2d')!;
+	const prepared = { size, letters, slots, glyphs, line, lineSize, scratch };
+	return {
+		draw: (t: number, endColor: string) => drawBootScreen(ctx, t, endColor, prepared),
+		dispose() {
+			for (const { image } of [...glyphs.values(), line]) image.width = image.height = 0;
+			scratchCanvas.width = scratchCanvas.height = 0;
+			glyphs.clear();
+		}
+	};
+
+	function paint(
+		text: string,
+		font: string,
+		colour: string,
+		scale: number,
+		originX = 0,
+		originY = 0
+	): Letter {
+		ctx.font = font;
+		const metrics = ctx.measureText(text);
+		// Hinting at the raster size can extend beyond the unscaled metrics by part of a pixel.
+		const padding = Math.ceil(scale) + 2;
+		const x = Math.floor((originX - metrics.actualBoundingBoxLeft) * scale) - padding;
+		const y = Math.floor((originY - metrics.actualBoundingBoxAscent) * scale) - padding;
+		const image = document.createElement('canvas');
+		image.width = Math.ceil((originX + metrics.actualBoundingBoxRight) * scale) + padding - x;
+		image.height = Math.ceil((originY + metrics.actualBoundingBoxDescent) * scale) + padding - y;
+		const pen = image.getContext('2d')!;
+		pen.scale(scale, scale);
+		pen.font = font;
+		pen.textBaseline = 'middle';
+		pen.fillStyle = colour;
+		pen.fillText(text, originX - x / scale, originY - y / scale);
+		return { image, x: x / scale - originX, y: y / scale - originY, width: metrics.width };
+	}
+}
+
+export function drawBootScreen(
+	ctx: CanvasRenderingContext2D,
+	t: number,
+	endColor: string,
+	prepared?: Prepared
+) {
 	const { width: w, height: h } = ctx.canvas;
 	ctx.fillStyle = PAPER;
 	ctx.fillRect(0, 0, w, h);
 	ctx.textBaseline = 'middle';
 	ctx.textAlign = 'left';
 
-	drawLine(ctx, t, w, h);
-	drawWordmark(ctx, t, w, h);
+	drawLine(ctx, t, w, h, prepared);
+	drawWordmark(ctx, t, w, h, prepared);
 
 	const fade = clamp((t - 3.5) / 0.45);
 	if (fade > 0) {
@@ -45,20 +140,27 @@ export function drawBootScreen(ctx: CanvasRenderingContext2D, t: number, endColo
 	}
 }
 
-function drawWordmark(ctx: CanvasRenderingContext2D, t: number, w: number, h: number) {
+function drawWordmark(
+	ctx: CanvasRenderingContext2D,
+	t: number,
+	w: number,
+	h: number,
+	prepared?: Prepared
+) {
 	// Fit the word to its final width, then lay out each letter's slot.
-	let size = h * WORD_SIZE;
+	let size = prepared?.size ?? h * WORD_SIZE;
 	ctx.font = wordFont(size);
-	size *= Math.min(1, (w * WORD_MAX_WIDTH) / ctx.measureText(WORDMARK).width);
+	if (!prepared) size *= Math.min(1, (w * WORD_MAX_WIDTH) / ctx.measureText(WORDMARK).width);
 	ctx.font = wordFont(size);
-	const letters = [...WORDMARK];
-	const total = ctx.measureText(WORDMARK).width;
-	const slots: number[] = [];
-	let x = -total / 2;
-	for (const letter of letters) {
-		const lw = ctx.measureText(letter).width;
-		slots.push(x + lw / 2);
-		x += lw;
+	const letters = prepared?.letters ?? [...WORDMARK];
+	const slots = prepared?.slots ?? [];
+	if (!prepared) {
+		let x = -ctx.measureText(WORDMARK).width / 2;
+		for (const letter of letters) {
+			const lw = ctx.measureText(letter).width;
+			slots.push(x + lw / 2);
+			x += lw;
+		}
 	}
 
 	// The assembled word first sits high and a little larger, then drops into place.
@@ -90,25 +192,58 @@ function drawWordmark(ctx: CanvasRenderingContext2D, t: number, w: number, h: nu
 		ctx.globalAlpha = clamp(p * 6);
 		ctx.translate(lx, ly);
 		ctx.scale(scale, scale);
-		ctx.fillStyle = letterColour(t, seed, slotX / w);
-		ctx.fillText(letter, -ctx.measureText(letter).width / 2, 0);
+		const colour = letterColour(t, seed, slotX / w);
+		if (prepared) {
+			ctx.imageSmoothingQuality = 'high';
+			const glyph = prepared.glyphs.get(letter)!;
+			const pen = prepared.scratch;
+			pen.clearRect(0, 0, pen.canvas.width, pen.canvas.height);
+			pen.drawImage(glyph.image, 0, 0);
+			pen.globalCompositeOperation = 'source-in';
+			pen.fillStyle = colour;
+			pen.fillRect(0, 0, glyph.image.width, glyph.image.height);
+			pen.globalCompositeOperation = 'source-over';
+			ctx.drawImage(
+				pen.canvas,
+				0,
+				0,
+				glyph.image.width,
+				glyph.image.height,
+				glyph.x - glyph.width / 2,
+				glyph.y,
+				glyph.image.width / 5,
+				glyph.image.height / 5
+			);
+		} else {
+			ctx.fillStyle = colour;
+			ctx.fillText(letter, -ctx.measureText(letter).width / 2, 0);
+		}
 		ctx.restore();
 	}
 }
 
-function drawLine(ctx: CanvasRenderingContext2D, t: number, w: number, h: number) {
+function drawLine(
+	ctx: CanvasRenderingContext2D,
+	t: number,
+	w: number,
+	h: number,
+	prepared?: Prepared
+) {
 	const appear = clamp(t / 0.25);
 	if (appear <= 0) return;
-	let size = h * LINE_SIZE;
+	let size = prepared?.lineSize ?? h * LINE_SIZE;
 	ctx.font = lineFont(size);
-	size *= Math.min(1, (w * LINE_MAX_WIDTH) / ctx.measureText(LINE).width);
+	if (!prepared) size *= Math.min(1, (w * LINE_MAX_WIDTH) / ctx.measureText(LINE).width);
 	ctx.font = lineFont(size);
-	const lw = ctx.measureText(LINE).width;
+	const lw = prepared?.line.width ?? ctx.measureText(LINE).width;
 	const x = (w - lw) / 2;
 	const y = h * LINE_CENTRE_Y;
 	ctx.globalAlpha = appear;
 	ctx.fillStyle = rgb(MAGENTA);
-	ctx.fillText(LINE, x, y);
+	if (prepared) {
+		const line = prepared.line;
+		ctx.drawImage(line.image, x + line.x, y + line.y);
+	} else ctx.fillText(LINE, x, y);
 	ctx.globalAlpha = 1;
 
 	// A glint runs across the line just before the ding, briefly washing the letters out.

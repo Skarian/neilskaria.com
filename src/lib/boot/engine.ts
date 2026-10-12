@@ -12,7 +12,7 @@ import { lightmapScales } from './assets';
 import { bakedLighting, bakedMaterial, fillLightmap, type BakedLighting } from './baked-material';
 import { fetchRoom } from './fetches';
 import { createBonsai, growBonsai, swayTime } from './bonsai';
-import { BOOT_DURATION, drawBootScreen } from './boot-screen';
+import { BOOT_DURATION, prepareBootScreen } from './boot-screen';
 import { drawClockLED, drawFrequencyLED } from './clock-led';
 import { FM_MIN } from '#lib/radio/stations.js';
 import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
@@ -853,6 +853,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	await breathe();
 	const sound = await sounding;
 	await document.fonts.ready;
+	const bootScreen = await prepareBootScreen(screenCtx, breathe);
+	await breathe();
 	// The first draw of each mesh does more than draw (checks its shader, uploads its buffers), so the
 	// room is drawn behind the loader two meshes at a time first, into a single pixel. A spare layer
 	// picks them out, with the lights, so the shaders are the room's own.
@@ -1370,7 +1372,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 				screenCtx.fillRect(0, 0, screenCanvas.width, screenCanvas.height);
 				screenCtx.fillStyle = `rgba(0, 0, 0, ${screenFade.value})`;
 				screenCtx.fillRect(0, 0, screenCanvas.width, screenCanvas.height);
-			} else drawBootScreen(screenCtx, s.boot, background);
+			} else bootScreen.draw(s.boot, background);
 			screenTexture.needsUpdate = true;
 		}
 		rubiks.sync();
@@ -2273,6 +2275,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		trail.remove();
 		for (const picker of pickers) picker.geometry.dispose();
 		screenTexture.dispose();
+		bootScreen.dispose();
 		clockTexture.dispose();
 		renderer.dispose();
 		renderer.forceContextLoss();
