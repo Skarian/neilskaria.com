@@ -1268,6 +1268,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		const v = viewOf(thing);
 		focusView.eye.copy(v.eye);
 		focusView.target.copy(v.target);
+		gsap.killTweensOf(focusBlend);
 		gsap.to(focusBlend, { value: 1, duration: 1.1, ease: 'power3.inOut' });
 		onFocus(thing);
 	}
@@ -1277,6 +1278,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 		if (focused === 'cube') putCubeDown();
 		if (focused === 'bonsai') leaveTree();
 		focused = null;
+		gsap.killTweensOf(focusBlend);
 		gsap.to(focusBlend, { value: 0, duration: 1.0, ease: 'power3.inOut' });
 		onFocus(null);
 	}
