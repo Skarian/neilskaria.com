@@ -57,3 +57,5 @@ vite.config.ts.timestamp-*
 
 # Windows
 Thumbs.db
+
+/.agents/artifacts/portrait-exploration-archive/
