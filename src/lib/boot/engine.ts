@@ -150,7 +150,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
 	const screenCanvas = document.createElement('canvas');
 	screenCanvas.width = 960;
 	screenCanvas.height = 640;
-	const screenCtx = screenCanvas.getContext('2d')!;
+	const screenCtx = screenCanvas.getContext('2d', { willReadFrequently: true })!;
 	const screenTexture = new THREE.CanvasTexture(screenCanvas);
 	screenTexture.colorSpace = THREE.SRGBColorSpace;
 	screenTexture.flipY = false;
