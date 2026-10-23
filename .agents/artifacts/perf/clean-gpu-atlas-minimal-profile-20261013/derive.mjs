@@ -1,0 +1,6 @@
+﻿
+import fs from 'node:fs';import {out,write} from './prepare.mjs';
+const a=JSON.parse(fs.readFileSync(out+'/runs/preflight/analysis.json')),d=JSON.parse(fs.readFileSync(out+'/runs/preflight/result.json'));
+write('derived-summary.json',{excludedPreflight:true,measuredSessions:0,comparison:null,clockResidual:a.clock.maxResidual,firstMarker:{valid:false,reason:'returning write absent; cached scalar not observable during permitted prefix'},replayMarker:{valid:true,raw:a.text[1].rawSemanticFirstLetter,frame:a.text[1].alignedFrame,hookEnd:a.text[1].hooks.end,observer:a.text[1].text.observerPerRafBucket},eventCounts:a.markerEvidence.eventCounts,nativeObserverRecordCounts:a.observerNativeRecords.reduce((s,x)=>(s[x.name]=(s[x.name]||0)+1,s),{}),listenerBounds:a.nativeListenerWholeEventBounds,model:d.resourceBodies.find(x=>x.url.endsWith('.glb.br')),trace:{eof:d.traceCompletion.eof,loss:d.traceCompletion.dataLossOccurred,events:d.traceCompletion.events},unavailable:['first boot semantic letter','first-active physical draw','hardware GPU time/VRAM','O/A comparison','fixed-time fidelity']});
+const p=out+'/marker-source-correspondence.json',s=fs.readFileSync(p,'utf8').replace('native screen animation callback','native animation callback');fs.writeFileSync(p,s);
+

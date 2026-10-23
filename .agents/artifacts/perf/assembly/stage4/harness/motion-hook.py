@@ -1,0 +1,2 @@
+from pathlib import Path
+p=Path('src/lib/boot/engine.ts');s=p.read_text();s=s.replace('if (import.meta.env.DEV)\n\t\t\tObject.assign(window,','if (true)\n\t\t\tObject.assign(window,');s=s.replace('\tsetMode(mode);\n\temitCube();\n\treturn {','window.__room={renderer,scene,camera,bonsai,rubiks,sound,sp,focus,pickers,state:()=>({mode,focused,watering,spin})};\n\tsetMode(mode);\n\temitCube();\n\treturn window.__room.controller = {');p.write_text(s)

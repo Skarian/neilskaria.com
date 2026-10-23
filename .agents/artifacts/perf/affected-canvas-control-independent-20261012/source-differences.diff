@@ -1,0 +1,103 @@
+--- old/src\lib\boot\context-control.ts
++++ control/src\lib\boot\context-control.ts
+@@ -0,0 +1,8 @@
++// This query selects only the actual boot-screen Canvas2D context.
++export const bootCanvasMode =
++	typeof window !== 'undefined' &&
++	new URLSearchParams(location.search).get('bootCanvas') === 'will-read-frequently'
++		? 'will-read-frequently'
++		: 'default';
++export const bootCanvasOptions =
++	bootCanvasMode === 'will-read-frequently' ? { willReadFrequently: true } : undefined;
+--- old/src\lib\boot\diagnostic.ts
++++ control/src\lib\boot\diagnostic.ts
+@@ -1,3 +1,4 @@
++import { bootCanvasMode, bootCanvasOptions } from './context-control';
+ type EventRecord = { kind: string; t: number; run: number; [key: string]: unknown };
+ type Frame = {
+ 	t: number;
+@@ -24,6 +25,9 @@
+ 		lastFrame: number | null = null,
+ 		activation = false;
+ 	let glMetadata: Record<string, unknown> = {};
++	let bootCanvasAttributes: CanvasRenderingContext2DSettings | null = null;
++	let bootCanvasAttributesStatus: 'not-created' | 'supported' | 'unsupported' | 'failed' =
++		'not-created';
+ 	let panel: HTMLDetailsElement | undefined;
+ 	const sessionId = new Date().toISOString().replace(/[:.]/g, '-');
+ 	const push = <T>(a: T[], value: T, limit: number, key: keyof typeof dropped) => {
+@@ -106,6 +110,14 @@
+ 		];
+ 		return {
+ 			schemaVersion: 1,
++			schemaRevision: 'canvas-context-control-1',
++			experiment: {
++				mode: bootCanvasMode,
++				requestedContextOptions: bootCanvasOptions ?? null,
++				requestedContextOptionsOmitted: bootCanvasOptions === undefined,
++				contextAttributes: bootCanvasAttributes,
++				contextAttributesStatus: bootCanvasAttributesStatus
++			},
+ 			label: 'FIRST-BOOT DIAGNOSTIC',
+ 			reference: 'a796e9aea60def6e0849cb75a151fd6570942339',
+ 			cameraFix: '042dc805',
+@@ -176,7 +188,7 @@
+ 		const url = URL.createObjectURL(blob),
+ 			a = document.createElement('a');
+ 		a.href = url;
+-		a.download = 'first-boot-diagnostic-' + sessionId + '.json';
++		a.download = 'first-boot-diagnostic-' + bootCanvasMode + '-' + sessionId + '.json';
+ 		a.click();
+ 		setTimeout(() => URL.revokeObjectURL(url), 1000);
+ 	}
+@@ -185,7 +197,9 @@
+ 		panel.id = 'firstboot-diagnostic';
+ 		panel.open = true;
+ 		panel.innerHTML =
+-			'<summary>FIRST-BOOT DIAGNOSTIC</summary><div><ol><li>Wait for START. Press START. Wait for the site.</li><li>Press BACK TO THE ROOM. Wait for START.</li><li>Press START again. Wait for the site.</li><li>Download the diagnostic file.</li></ol><p>Keep this tab open between boots. Data stays in this browser. No automatic upload.</p><label>Device name (optional) <input id="diagnostic-device" maxlength="80"></label><p><button id="diagnostic-download" type="button">Download JSON</button> <button id="diagnostic-restart" type="button">Restart by reload</button></p><p id="diagnostic-status">Waiting for first START.</p><p>Submission timestamps do not prove displayed frames. This preview measures behavior. It does not improve stutter.</p><p>Optional Chrome trace: Open DevTools → Performance. Record the same sequence. Stop and save the trace. Android does not need remote debugging for this JSON file.</p></div>';
++			'<summary>FIRST-BOOT DIAGNOSTIC: ' +
++			bootCanvasMode +
++			'</summary><div><ol><li>Wait for START. Press START. Wait for the site.</li><li>Press BACK TO THE ROOM. Wait for START.</li><li>Press START again. Wait for the site.</li><li>Download the diagnostic file.</li></ol><p>Keep this tab open between boots. Data stays in this browser. No automatic upload.</p><label>Device name (optional) <input id="diagnostic-device" maxlength="80"></label><p><button id="diagnostic-download" type="button">Download JSON</button> <button id="diagnostic-restart" type="button">Restart by reload</button></p><p id="diagnostic-status">Waiting for first START.</p><p>Submission timestamps do not prove displayed frames. This preview measures behavior. It does not improve stutter.</p><p>Optional Chrome trace: Open DevTools → Performance. Record the same sequence. Stop and save the trace. Android does not need remote debugging for this JSON file.</p></div>';
+ 		const style = document.createElement('style');
+ 		style.textContent =
+ 			'#firstboot-diagnostic{position:fixed;left:8px;top:8px;z-index:2147483646;max-width:min(320px,calc(100vw - 16px));max-height:38vh;overflow:auto;padding:8px;background:#fff;color:#111;border:1px solid #777;border-radius:6px;font:12px/1.4 Arial,sans-serif;box-sizing:border-box}#firstboot-diagnostic summary{cursor:pointer;font-weight:bold}#firstboot-diagnostic ol{padding-left:20px}#firstboot-diagnostic button,#firstboot-diagnostic input{font:inherit;color:#111;background:#fff;border:1px solid #777;border-radius:3px;padding:5px}#firstboot-diagnostic p{margin:8px 0}#firstboot-diagnostic[data-moving],#firstboot-diagnostic[data-focused]{display:none}';
+@@ -209,6 +223,17 @@
+ 		once,
+ 		snapshot,
+ 		download,
++		bootCanvas(ctx: CanvasRenderingContext2D) {
++			if (typeof ctx.getContextAttributes === 'function') {
++				try {
++					bootCanvasAttributes = ctx.getContextAttributes();
++					bootCanvasAttributesStatus = 'supported';
++				} catch {
++					bootCanvasAttributesStatus = 'failed';
++				}
++			} else bootCanvasAttributesStatus = 'unsupported';
++			mark('boot-canvas-context-created', { mode: bootCanvasMode });
++		},
+ 		focus(value: boolean) {
+ 			panel?.toggleAttribute('data-focused', value);
+ 		},
+--- old/src\lib\boot\engine.ts
++++ control/src\lib\boot\engine.ts
+@@ -1,4 +1,5 @@
+ import { diagnostic as diag } from './diagnostic';
++import { bootCanvasOptions } from './context-control';
+ // The room: the bedside table in 3D, the home screen of the site. Click the Game Boy Advance SP and it
+ // lifts off the table, boots, and the camera dives into its screen to hand over to the page; going
+ // back plays the same thing in reverse. While the page is showing, nothing renders.
+@@ -153,7 +154,12 @@
+ 	const screenCanvas = document.createElement('canvas');
+ 	screenCanvas.width = 960;
+ 	screenCanvas.height = 640;
+-	const screenCtx = screenCanvas.getContext('2d')!;
++	const screenCtx = (
++		bootCanvasOptions
++			? screenCanvas.getContext('2d', bootCanvasOptions)
++			: screenCanvas.getContext('2d')
++	) as CanvasRenderingContext2D;
++	diag?.bootCanvas(screenCtx);
+ 	const screenTexture = new THREE.CanvasTexture(screenCanvas);
+ 	screenTexture.onUpdate = () =>
+ 		diag?.once('screen-texture-upload-submitted', { boot: s.boot, mode });

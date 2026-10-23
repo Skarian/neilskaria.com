@@ -1,0 +1,11 @@
+import fs from 'node:fs';import{pathToFileURL}from'node:url';import{root}from'./setup.mjs';
+const pkg='C:/Users/Neil Skaria/AppData/Roaming/npm-cache/_npx/0f94ee7615faf582/node_modules',load=p=>import(pathToFileURL(pkg+'/'+p).href),saver=await load('lighthouse/core/lib/asset-saver.js'),{PageDependencyGraph}=await load('lighthouse/core/computed/page-dependency-graph.js'),{LoadSimulator}=await load('lighthouse/core/computed/load-simulator.js');
+const labels=process.argv.slice(2).length?process.argv.slice(2):['A','B','C'];const all=[];
+for(const label of labels)for(const file of fs.readdirSync(root+'/'+label).filter(f=>/^lh-(mobile|desktop)-\d+\.summary.json$/.test(f))){
+const base=root+'/'+label+'/'+file.replace('.summary.json',''),s=JSON.parse(fs.readFileSync(base+'.summary.json')),l=JSON.parse(fs.readFileSync(base+'.json')),a=saver.loadArtifacts(base+'-assets'),trace=a.Trace,context={settings:l.configSettings,computedCache:new Map()},settings=l.configSettings;
+const graph=await PageDependencyGraph.request({settings,trace,devtoolsLog:a.DevtoolsLog,URL:a.URL,SourceMaps:a.SourceMaps,HostDPR:a.HostDPR,fromTrace:false},context),simulator=await LoadSimulator.request({devtoolsLog:a.DevtoolsLog,settings},context),simulation=simulator.simulate(graph,{label:'long-tasks-diagnostic'});
+const entries=[...simulation.nodeTimings].filter(([n])=>n.type==='cpu');const tasks=entries.map(([n,t])=>({ts:n.event.ts,observed:n.event.dur/1000,simulated:t.duration,start:t.startTime,name:n.event.name}));
+const uploads=s.room.uploads.map(u=>{const marks=trace.traceEvents.filter(e=>e.name==='map:'+u.label);const mark=marks[0];const match=mark?entries.filter(([n])=>n.event.ts<=(mark.args?.data?.callTime??mark.ts)&&n.event.ts+n.event.dur>=(mark.args?.data?.callTime??mark.ts)).sort(([a],[b])=>a.event.dur-b.event.dur)[0]:undefined;return {...u,observedTask:match?match[0].event.dur/1000:undefined,simulatedTask:match?.[1].duration,simulatedStart:match?.[1].startTime,markFound:!!mark};});
+const data={...s,uploads,cpuTasks:tasks.sort((a,b)=>b.simulated-a.simulated).slice(0,20)};fs.writeFileSync(base+'.linked.json',JSON.stringify(data,null,2));all.push(data);console.log(label,s.device,s.run,'room',uploads.find(x=>x.label==='room-day'));}
+fs.writeFileSync(root+'/linked-runs.json',JSON.stringify(all,null,2));
+

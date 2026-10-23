@@ -1,0 +1,15 @@
+# Supplied Lighthouse navigation reports, 2026-10-13
+
+Both reports concern the clean GPU atlas preview /lab/boot, Lighthouse13.4.1, fetched22:00:22Z desktop and22:00:45Z mobile. Desktopperformance99, mobile97. Accessibility96/bestpractices100/SEO50 both. No runWarnings. Host is macOSChrome154; mobile uses simulated4xCPU and1638.4Kbps throughput, not an actual Android device measurement.
+
+Desktop FCP380.079ms/LCP600.914ms/TBT0/CLS0/SpeedIndex966.508ms. Mobile FCP1259.861/LCP1665.098/TBT105/CLS0/SpeedIndex4149.865. Mobile metric scores/weights: FCP.98/10,LCP.99/25,TBT.98/30,CLS1/25,SI.78/10. Most weighted score deficit is SI (~2.2points using rounded metric scores). LCP node is NEILSKARIA H1 in both reports. It does not measure WebGLroom readiness or START animation/lantern/radio input smoothness. Report does not disclose saved boot-seen/room-place values, so no claim of fresh first-visitor room-state equivalence.
+
+Mobile transfer2081334bytes; model966458bytes(~46.4%)/decoded1183392; scenechunkBoEooYH-.js226152transferred/794683decoded; atlasPNG37279transferred. Approx2MiB total. ModelalreadyBrotli and Draco decoder fetched. Model simplification/geometry-specific inspection is a candidate, no measured savings or source change.
+
+Mobile mainthreadwork2895.992ms: scriptEvaluation1826.732,other783.876,styleLayout179.784,render59.676,GC34.136,HTMLCSS8.572,parsecompile3.216. Bootupscenechunk1147.184total/787.412scripting; unattributable1502.464total/957.940scripting. No raw native trace/sourcemap attribution supplied for unknown work. Six reported longtasks59-189ms. Do not add overlapping perURL/nested groups, identify unknown work as shader/decode or equate aggregateCPU with freeze time.
+
+UnusedJS estimate81067bytes but0msFCP/LCP savings; renderblockingCSS0msFCP/LCP savings. Deprioritize those warnings. Do not remove Three features based on navigation-only coverage. Desktopcachewarning is VercelpreviewfeedbackJS23341bytes, mobile no cachewarning. No generalized app cache failure. SEOnoindex is explicit prototype source, not performance. Contrast audit10items separate accessibility issue.
+
+Accepted source inspection: BootIntro background room loading already uses requestIdleCallback(timeout4000), skips saveData/2g and reducedmotion path. Engine pauses render loop when mode=site or documenthidden. Next useful investigation is actual room startup payload/initialization, preserving instantBACK behavior. No blind hidden-render-loop fix, context hint revival or background warmup addition. No changes/deployments/tests performed in this review.
+
+Primary documentation checked: https://developer.chrome.com/docs/lighthouse/performance/performance-scoring ; https://developer.chrome.com/docs/lighthouse/performance/speed-index ; https://developer.chrome.com/docs/lighthouse/performance/lighthouse-total-blocking-time ; https://web.dev/articles/lcp . Metrics table in metrics.html checked with html_preview at390px,301pxheight, no console messages.

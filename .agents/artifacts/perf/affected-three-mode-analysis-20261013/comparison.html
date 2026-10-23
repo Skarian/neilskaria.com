@@ -1,0 +1,23 @@
+﻿<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+*{box-sizing:border-box}body{margin:0;color:var(--foreground,#17212b);background:var(--background,#fff);font:14px/1.35 var(--font-sans,Arial,sans-serif)}h2{font-size:19px;margin:0 0 7px}p{margin:7px 0}.muted{color:var(--muted-foreground,#5c6874)}table{border-collapse:collapse;width:100%;font-size:13px;margin:10px 0}td,th{padding:6px 3px;text-align:right;border-bottom:1px solid var(--border,#ddd)}td:first-child,th:first-child{text-align:left}th{font-size:12px}.bars{display:grid;gap:7px;margin:12px 0}.row{display:grid;grid-template-columns:65px 1fr 92px;align-items:center;gap:7px}.bar{height:15px;background:var(--chart-1,#367ec7);border-radius:3px}.gpu{background:var(--chart-2,#5b9f7b)}.control{background:var(--chart-3,#ac8a37)}.small{font-size:12px}.note{border-left:3px solid var(--warning,#a57215);padding-left:8px;margin:10px 0}.call{font-weight:600;margin-top:11px}@media(max-width:400px){body{font-size:12px;line-height:1.3}h2{font-size:17px}td,th{padding:5px 2px}table{font-size:12px}.row{grid-template-columns:57px 1fr 86px;gap:5px}}
+</style></head><body>
+<h2>Choose the hint for the next preview</h2>
+<p>GPU and control feel <b>“About the same.”</b> Default is visually slower. GPU text <b>“Looks consistent.”</b></p>
+<p class="small muted">Text callback intervals · first / replay · 0.35 ≤ boot &lt; 3.5</p>
+<div class="bars"><div class="row"><span>Default</span><div class="bar" style="width:100%"></div><b>33.91 / 32.68</b></div><div class="row"><span>Control</span><div class="bar control" style="width:49.2%"></div><b>16.68 / 16.69</b></div><div class="row"><span>GPU</span><div class="bar gpu" style="width:49.2%"></div><b>16.69 / 16.69</b></div></div>
+<table><thead><tr><th>Measured ms</th><th>Default</th><th>Control</th><th>GPU</th></tr></thead><tbody>
+<tr><td>Text p95¹</td><td>51.24 / 48.86</td><td>17.86 / 17.00</td><td>17.10 / 17.30</td></tr>
+<tr><td>Text submit¹</td><td>3.06 / 2.79</td><td>8.85 / 8.39</td><td>2.51 / 2.42</td></tr>
+<tr><td>Text total¹</td><td>4.40 / 3.79</td><td>9.92 / 9.21</td><td>3.18 / 2.97</td></tr>
+<tr><td>Tail max¹</td><td>66.8 / 66.2</td><td>53.2 / 37.6</td><td>17.2 / 54.2</td></tr>
+<tr><td>Create → ready²</td><td>1107.7</td><td>1257.5</td><td>1842.6</td></tr>
+<tr><td>Response → ready²</td><td>1631.4</td><td>1907.6</td><td>2298.7</td></tr>
+</tbody></table>
+<div class="note"><b>Startup negative:</b> GPU create → ready was <b>585.1 ms longer</b> than control. Control was <b>149.8 ms longer</b> than default. State/cache differences prevent causal attribution.</div>
+<p class="small">² GPU starts in-room. Control/default start on-page, then return before START. START readiness times are not comparable.</p>
+<p class="small">GPU saves about <b>6 ms</b> CPU submission, with equal perceived smoothness. Atlas: <b>10.67 MiB mips + 8 MiB bitmap</b> nominal; original: 3.125 MiB mips. Allocation/shader cost unmeasured.</p>
+<p class="small muted">¹ First / replay. CPU means use previous callbacks; timers nest. Tail gaps remain. Old 118.9 ms gap did not recur. Presentation unmeasured.</p>
+<p class="call">Next: advance the minimal hint. Retain atlas as an experiment. No production acceptance.</p>
+<p class="small muted">Hashes, modes, full boots/returns and markers pass. One fixed-order session per mode. Evidence supports a canvas-path contribution; native cause remains unknown.</p>
+</body></html>
+

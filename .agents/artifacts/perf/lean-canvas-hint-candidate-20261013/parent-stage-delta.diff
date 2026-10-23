@@ -1,0 +1,48 @@
+diff --git "a/C:\\projects\\neilskaria.com\\.agents\\artifacts\\perf\\canvas-context-control-20261012/source-stage/src/lib/boot/context-control.ts" "b/C:\\projects\\neilskaria.com\\.agents\\artifacts\\perf\\lean-canvas-hint-candidate-20261013/source-stage/src/lib/boot/context-control.ts"
+index dffbb0c..80a241b 100644
+--- "a/C:\\projects\\neilskaria.com\\.agents\\artifacts\\perf\\canvas-context-control-20261012/source-stage/src/lib/boot/context-control.ts"
++++ "b/C:\\projects\\neilskaria.com\\.agents\\artifacts\\perf\\lean-canvas-hint-candidate-20261013/source-stage/src/lib/boot/context-control.ts"
+@@ -1,8 +1,15 @@
+ // This query selects only the actual boot-screen Canvas2D context.
+-export const bootCanvasMode =
+-	typeof window !== 'undefined' &&
+-	new URLSearchParams(location.search).get('bootCanvas') === 'will-read-frequently'
+-		? 'will-read-frequently'
+-		: 'default';
++const requestedMode =
++	typeof window !== 'undefined' ? new URLSearchParams(location.search).get('bootCanvas') : null;
++if (
++	requestedMode !== null &&
++	requestedMode !== 'default' &&
++	requestedMode !== 'will-read-frequently'
++) {
++	throw new Error(
++		'Unsupported bootCanvas mode: ' + requestedMode + '. Use default or will-read-frequently.'
++	);
++}
++export const bootCanvasMode = requestedMode === 'default' ? 'default' : 'will-read-frequently';
+ export const bootCanvasOptions =
+ 	bootCanvasMode === 'will-read-frequently' ? { willReadFrequently: true } : undefined;
+diff --git "a/C:\\projects\\neilskaria.com\\.agents\\artifacts\\perf\\canvas-context-control-20261012/source-stage/src/lib/boot/diagnostic.ts" "b/C:\\projects\\neilskaria.com\\.agents\\artifacts\\perf\\lean-canvas-hint-candidate-20261013/source-stage/src/lib/boot/diagnostic.ts"
+index ae1d786..d11cf44 100644
+--- "a/C:\\projects\\neilskaria.com\\.agents\\artifacts\\perf\\canvas-context-control-20261012/source-stage/src/lib/boot/diagnostic.ts"
++++ "b/C:\\projects\\neilskaria.com\\.agents\\artifacts\\perf\\lean-canvas-hint-candidate-20261013/source-stage/src/lib/boot/diagnostic.ts"
+@@ -110,7 +110,8 @@ function createDiagnostic() {
+ 		];
+ 		return {
+ 			schemaVersion: 1,
+-			schemaRevision: 'canvas-context-control-1',
++			schemaRevision: 'lean-canvas-hint-candidate-1',
++			sourceId: 'lean-canvas-hint-candidate-20261013',
+ 			experiment: {
+ 				mode: bootCanvasMode,
+ 				requestedContextOptions: bootCanvasOptions ?? null,
+@@ -199,7 +200,7 @@ function createDiagnostic() {
+ 		panel.innerHTML =
+ 			'<summary>FIRST-BOOT DIAGNOSTIC: ' +
+ 			bootCanvasMode +
+-			'</summary><div><ol><li>Wait for START. Press START. Wait for the site.</li><li>Press BACK TO THE ROOM. Wait for START.</li><li>Press START again. Wait for the site.</li><li>Download the diagnostic file.</li></ol><p>Keep this tab open between boots. Data stays in this browser. No automatic upload.</p><label>Device name (optional) <input id="diagnostic-device" maxlength="80"></label><p><button id="diagnostic-download" type="button">Download JSON</button> <button id="diagnostic-restart" type="button">Restart by reload</button></p><p id="diagnostic-status">Waiting for first START.</p><p>Submission timestamps do not prove displayed frames. This preview measures behavior. It does not improve stutter.</p><p>Optional Chrome trace: Open DevTools → Performance. Record the same sequence. Stop and save the trace. Android does not need remote debugging for this JSON file.</p></div>';
++			' | lean-canvas-hint-candidate-20261013</summary><div><ol><li>Wait for START. Press START. Wait for the site.</li><li>Press BACK TO THE ROOM. Wait for START.</li><li>Press START again. Wait for the site.</li><li>Download the diagnostic file.</li></ol><p>Keep this tab open between boots. Data stays in this browser. No automatic upload.</p><label>Device name (optional) <input id="diagnostic-device" maxlength="80"></label><p><button id="diagnostic-download" type="button">Download JSON</button> <button id="diagnostic-restart" type="button">Restart by reload</button></p><p id="diagnostic-status">Waiting for first START.</p><p>Submission timestamps do not prove displayed frames. This preview measures behavior. It does not improve stutter.</p><p>Optional Chrome trace: Open DevTools → Performance. Record the same sequence. Stop and save the trace. Android does not need remote debugging for this JSON file.</p></div>';
+ 		const style = document.createElement('style');
+ 		style.textContent =
+ 			'#firstboot-diagnostic{position:fixed;left:8px;top:8px;z-index:2147483646;max-width:min(320px,calc(100vw - 16px));max-height:38vh;overflow:auto;padding:8px;background:#fff;color:#111;border:1px solid #777;border-radius:6px;font:12px/1.4 Arial,sans-serif;box-sizing:border-box}#firstboot-diagnostic summary{cursor:pointer;font-weight:bold}#firstboot-diagnostic ol{padding-left:20px}#firstboot-diagnostic button,#firstboot-diagnostic input{font:inherit;color:#111;background:#fff;border:1px solid #777;border-radius:3px;padding:5px}#firstboot-diagnostic p{margin:8px 0}#firstboot-diagnostic[data-moving],#firstboot-diagnostic[data-focused]{display:none}';

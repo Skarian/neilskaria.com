@@ -1,0 +1,1 @@
+import fs from 'node:fs';const p='C:/projects/neilskaria.com-tbt2/src/lib/boot/engine.ts';let s=fs.readFileSync(p,'utf8').replace('\trenderer.toneMapping = THREE.ACESFilmicToneMapping;','\trenderer.debug.checkShaderErrors = import.meta.env.DEV;\n\trenderer.toneMapping = THREE.ACESFilmicToneMapping;');fs.writeFileSync(p,s);

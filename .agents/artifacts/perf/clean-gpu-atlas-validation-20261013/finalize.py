@@ -1,0 +1,22 @@
+﻿from validate import *
+import difflib
+manifest=json.loads((OUT/'input-manifest.json').read_bytes()); before=json.loads((OUT/'identity-before.json').read_bytes()); after=state(); write(OUT/'identity-after.json',after)
+assert before==after, 'Protected identity changed'
+files=[{'path':f['path'],**rec(OUT/'source'/f['path'])} for f in manifest['files']]
+assert files==[{k:f[k] for k in ['path','bytes','sha256']} for f in manifest['files']]
+digest=sha(''.join(f['path']+'\0'+f['sha256']+'\n' for f in files).encode()); assert digest==manifest['stageDigest']
+allowed={f['path'] for f in files}; actual={p.relative_to(OUT/'source').as_posix() for p in (OUT/'source').rglob('*') if p.is_file() and not any(x in {'node_modules','.svelte-kit'} for x in p.relative_to(OUT/'source').parts)}; assert actual==allowed
+base=ROOT/'.agents/artifacts/perf/clean-canvas-automated-profile-20261013/original'; baseline=json.loads((base/'manifest.json').read_bytes()); base_by={f['path']:f for f in baseline['files']}
+changed=[f['path'] for f in files if f['path'] in base_by and f['sha256']!=base_by[f['path']]['sha256']]; added=sorted(allowed-set(base_by)); assert changed==['src/lib/boot/engine.ts']; assert added==['public/boot-atlas.png','src/lib/boot/boot-atlas-metrics.json','src/lib/boot/boot-atlas.ts']
+upstream=json.loads((INPUT/'identity-before.json').read_bytes())
+for k in ['head','branch','index','tracked']: assert after[k]==upstream[k]
+for p,k in [('clean-canvas-automated-profile-20261013/original/manifest.json','baselineManifest'),('gpu-boot-atlas-failure-correction-20261012/source-manifest.json','correctedManifest')]: assert rec(ROOT/'.agents/artifacts/perf'/p)==upstream[k]
+engine=(OUT/'source/src/lib/boot/engine.ts').read_text(); atlas=(OUT/'source/src/lib/boot/boot-atlas.ts').read_text()
+for token in ['diagnostic','context-control','bootCanvasMode','bootCanvasOptions','screenCanvas','screenCtx','screenTexture','drawBootScreen','submitted(','onAfterRender','diag?.']: assert token not in engine
+for token in ['diagnostic','diag?.','submitted(','onUpdate','onAfterRender']: assert token not in atlas
+original=(base/'source/src/lib/boot/engine.ts').read_text(); (OUT/'engine-original.diff').write_text(''.join(difflib.unified_diff(original.splitlines(True),engine.splitlines(True),fromfile='original/engine.ts',tofile='validation/engine.ts')),encoding='utf8')
+(OUT/'formatting.diff').write_text('',encoding='utf8'); write(OUT/'source-manifest.json',manifest)
+checks={'status':'SOURCE AND FORMAT PASS; TYPECHECK BLOCKED; STOPPED FOR ROOT REVIEW','files':94,'stageDigest':digest,'unchangedOriginalFiles':90,'changedOriginalFiles':changed,'addedFiles':added,'allCopiedFilesByteIdenticalToReviewedSource':True,'png':rec(OUT/'source/public/boot-atlas.png'),'mainTrackedHeadBranchIndexRefsAndPriorSourceStagesByteIdentical':True,'priorManifestHashesMatchUpstreamEvidence':True,'formattingChanges':0,'cameraFontAudioTimingSource':'Original files other than engine unchanged; copied engine exactly reviewed atlas-only diff. Runtime fidelity untested.','diagnosticCanvasSelectorReferencesInEngineAndAtlas':False,'emittedAssets':'NOT BUILT; no claim','typecheck':{'errors':1,'warnings':0,'error':"+layout.svelte:3:35 Cannot find module ./$types",'cause':'Shared node_modules/$app/tsconfig.json rootDirs resolves main checkout, not owned stage'},'lifecycle':'NOT RUN: stopped at typecheck blocker','dependencyWarning':'SvelteKit sync rewrote shared generated $app metadata through junction. No before snapshot for dependencies; cannot certify dependency identity. No installs or package/lock edits.'}
+write(OUT/'source-checks.json',checks); write(OUT/'shared-app-current.json',inventory(ROOT/'node_modules/$app'))
+write(OUT/'lifecycle-status.json',{'status':'NOT RUN','reason':'Stop at typecheck blocker','requiredOfflineCases':['Immediate HTTP 404, network rejection and decode rejection: no early unhandled rejection; original ready still rejects at delayed boundary','Dispose during pending decode: abort once, remain pending before decode completes, close late bitmap once, never assign/update texture','Repeated dispose: texture/material disposal and abort/bitmap close idempotent','Successful ready: bitmap assigned once and retained until dispose'], 'limitations':['Mocked atlas-module tests cannot establish full engine WebGL cleanup','Browser tests not authorized in this task']})
+print(json.dumps(checks,indent=2))

@@ -1,0 +1,1 @@
+import fs from'node:fs';import path from'node:path';const repo='C:/projects/neilskaria.com-tbt2',output=path.resolve(repo,'.svelte-kit/output');if(output!=='C:\\projects\\neilskaria.com-tbt2\\.svelte-kit\\output')throw Error('unexpected output path');fs.rmSync(output,{recursive:true,force:true});fs.cpSync(process.env.TEMP+'/impl/tbt2/base-output',output,{recursive:true});

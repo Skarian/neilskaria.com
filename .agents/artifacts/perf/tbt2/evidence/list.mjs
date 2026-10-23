@@ -1,0 +1,1 @@
+import fs from 'node:fs';for(const t of JSON.parse(fs.readFileSync(process.env.TEMP+'/impl/tbt2/base-phone/tasks.json')))console.log(t.at,t.ms,JSON.stringify(t.self.slice(0,4)),JSON.stringify(t.stacks.slice(0,2)));

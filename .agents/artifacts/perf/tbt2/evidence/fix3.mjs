@@ -1,0 +1,4 @@
+import fs from'node:fs';import{execFileSync}from'node:child_process';const repo='C:/projects/neilskaria.com-tbt2',p=repo+'/src/lib/boot/engine.ts';let s=execFileSync('git',['show','c9be94d:src/lib/boot/engine.ts'],{cwd:repo,encoding:'utf8'});s=s.replace('compiling.push(renderer.compileAsync(mesh, camera, scene));\n\t\tawait breathe();',`compiling.push(renderer.compileAsync(mesh, camera, scene));
+		// Without parallel compilation, finish one shader at a time so uploads don't wait for them all.
+		if (!renderer.extensions.has('KHR_parallel_shader_compile')) renderer.getContext().finish();
+		await breathe();`);fs.writeFileSync(p,s);const native=process.env.TEMP+'/impl/tbt2/native.js';s=fs.readFileSync(native,'utf8').replace("'texSubImage2D'","'finish','flush','texSubImage2D'");fs.writeFileSync(native,s);

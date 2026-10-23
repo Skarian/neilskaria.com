@@ -1,0 +1,2 @@
+import fs from 'node:fs';import {spawn,execFileSync} from 'node:child_process';import {root,out} from './prepare.mjs';
+for(const name of ['original','hint']){try{const log=execFileSync(process.execPath,[root+'/node_modules/vite/bin/vite.js','build','--config','../harness.config.ts'],{cwd:out+'/'+name+'/source',windowsHide:true,encoding:'utf8',maxBuffer:30e6});fs.writeFileSync(out+'/'+name+'/build.log',log);console.log(name+' built')}catch(e){fs.writeFileSync(out+'/'+name+'/build-failure.log',(e.stdout||'')+(e.stderr||''));throw e}}

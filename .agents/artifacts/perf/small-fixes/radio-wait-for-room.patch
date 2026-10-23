@@ -1,0 +1,52 @@
+diff --git a/src/lib/radio/player.svelte.ts b/src/lib/radio/player.svelte.ts
+index 2ec2724..99aa5de 100644
+--- a/src/lib/radio/player.svelte.ts
++++ b/src/lib/radio/player.svelte.ts
+@@ -6,6 +6,7 @@
+ // Most stations are live YouTube streams, played by a hidden player; between stations there's
+ // static, and one station (Grove) is played right here. Both of those are synthesized locally.
+ 
++import { room } from '../boot/room.svelte';
+ import { createRadio } from './radio';
+ import { FM_MAX, FM_MIN, STATIONS, STREAMS, stationAt, type Station } from './stations';
+ import { createStreamPlayer, type StreamStatus } from './youtube';
+@@ -96,7 +97,7 @@ function setStatus() {
+ }
+ 
+ // Restores the station, volume and mute from last time; for someone who's listened before, gets
+-// their station ready in the background once the page is idle.
++// their station ready in the background once the room is ready or the page is showing and idle.
+ function load() {
+ 	if (loaded || typeof localStorage === 'undefined') return;
+ 	loaded = true;
+@@ -112,16 +113,28 @@ function load() {
+ 	}
+ 	const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
+ 	if (listened && !connection?.saveData) {
++		const waiting = () => !room.ready && document.documentElement.dataset.intro === 'play';
+ 		const ready = async () => {
++			// The room may have opened while this idle task was waiting its turn.
++			if (waiting()) return queue();
+ 			await fetchStreams();
+ 			const id = streamOf(stationAt(radio.freq));
++			if (waiting()) return queue();
+ 			if (id && !radio.on) {
+ 				streamFor = id;
+ 				await getStream().cue(id);
+ 			}
+ 		};
+-		if ('requestIdleCallback' in window) requestIdleCallback(() => void ready(), { timeout: 5000 });
+-		else setTimeout(() => void ready(), 2500);
++		const queue = () => {
++			// Don't let the idle timeout pull YouTube in while the room is still loading.
++			if (waiting()) {
++				setTimeout(queue, 250);
++				return;
++			}
++			if ('requestIdleCallback' in window) requestIdleCallback(() => void ready(), { timeout: 5000 });
++			else setTimeout(() => void ready(), 2500);
++		};
++		queue();
+ 	}
+ }
+ 

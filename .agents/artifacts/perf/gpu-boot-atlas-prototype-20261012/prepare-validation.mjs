@@ -1,0 +1,11 @@
+import fs from 'node:fs';import path from 'node:path';
+const out=path.resolve('.agents/artifacts/perf/gpu-boot-atlas-prototype-20261012');
+let s=fs.readFileSync('.agents/artifacts/perf/canvas-context-control-20261012/validate.mjs','utf8').replaceAll('canvas-context-control-20261012','gpu-boot-atlas-prototype-20261012').replace("'../first-boot-replay-20261012/cdp.mjs'","'./cdp.mjs'").replaceAll('4294','4297');
+s=s.replace("const mode=url.includes('bootCanvas=will-read-frequently')?'will-read-frequently':'default';", "const mode=new URL(url).searchParams.get('bootCanvas')||'default';");
+s=s.replace("check(name+' requested options',mode==='default'", "if(mode!=='gpu-atlas'){check(name+' requested options',mode==='default'");
+s=s.replace("check(name+' context created once',data.events.filter(e=>e.kind==='boot-canvas-context-created').length===1);", "check(name+' context created once',data.events.filter(e=>e.kind==='boot-canvas-context-created').length===1);}else{check(name+' no canvas paint',data.frames.every(f=>f.paintMs===0));check(name+' no canvas source/uploads',data.experiment.textureCounts.canvas.requests===0&&data.experiment.textureCounts.canvas.submissions===0);check(name+' atlas uploads once',data.experiment.textureCounts.atlas.requests===1&&data.experiment.textureCounts.atlas.submissions===1);check(name+' atlas ready before START',data.events.find(e=>e.kind==='atlas-ready').t<data.events.find(e=>e.kind==='START-gesture').t);check(name+' GPU markers honest',!data.events.some(e=>e.kind.includes('painted')||e.kind==='screen-texture-upload-submitted'));check(name+' GPU return draw',data.events.some(e=>e.kind==='solid-return-draw-submitted'));}");
+s=s.replaceAll("downloaded.schemaRevision==='canvas-context-control-1'", "downloaded.schemaRevision==='gpu-boot-atlas-1'");
+s=s.replace("downloaded.experiment.mode===(url.includes('bootCanvas=will-read-frequently')?'will-read-frequently':'default')","downloaded.experiment.mode===mode");
+s=s.replace("for(const mode of ['default','will-read-frequently'])", "for(const mode of ['will-read-frequently','gpu-atlas'])");
+s=s.replace("(mode==='default'?'':'?bootCanvas=will-read-frequently')", "'?bootCanvas='+mode");
+fs.writeFileSync(out+'/validate.mjs',s);

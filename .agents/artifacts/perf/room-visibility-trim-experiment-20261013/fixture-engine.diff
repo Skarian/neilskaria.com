@@ -1,0 +1,20 @@
+diff --git a/baseline/source/src/lib/boot/engine.ts b/fixture/source/src/lib/boot/engine.ts
+index ebc805a..01cb3c0 100644
+--- a/baseline/source/src/lib/boot/engine.ts
++++ b/fixture/source/src/lib/boot/engine.ts
+@@ -2313,6 +2313,15 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 		setTimeout(() => sound.close(), 4000);
+ 	}
+ 
++	// FIXTURE ONLY (never shipped): paint bed/background nodes in flat ID colours for coverage counts.
++	const FX_IDS = ["BedFrame","Mattress","Headboard","BedLeg0","BedLeg1","BedLeg2","BedLeg3","Duvet","SheetFold","Pillow0","Pillow1","Cushion","Rug","Floor","Skirting","WallLeft","WallRight","WallFar","WallBelow","WallAbove","SideWall","FrameTop","FrameLeft","FrameRight","Sill","MullionV","MullionH","Curtain0","Curtain1","CurtainRod","Sky"];
++	gltf.scene.traverse((object) => {
++		const k = FX_IDS.indexOf(object.name);
++		if (k < 0 || !(object instanceof THREE.Mesh)) return;
++		object.material = new THREE.MeshBasicMaterial({ color: new THREE.Color().setRGB(((k + 1) * 7) / 255, 0, 1, THREE.SRGBColorSpace), toneMapped: false, side: THREE.DoubleSide });
++		object.userData.fxId = k + 1;
++	});
++	Object.assign(window, { __fx: { scene, camera, renderer, THREE, ids: FX_IDS } });
+ 	setMode(mode);
+ 	emitCube();
+ 	return {

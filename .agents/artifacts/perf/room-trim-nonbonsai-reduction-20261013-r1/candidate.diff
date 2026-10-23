@@ -1,0 +1,11 @@
+# c2s-lower-pot01-leaves512 vs P upload-stage (trimmed baseline). Binary files; SHA-256 and bytes.
+M src/lib/boot/assets/bed-day.webp  58970 -> 27934  dba2192327a7514f569f184368ff9a3bf6177ef412ab88ec811b2ae6472c9a4c
+M src/lib/boot/assets/bed-lamp.webp  34702 -> 12666  248166c8f330ba3fa5f0860585cf79319ccf43f148b8f54976e797e45fac22f9
+M src/lib/boot/assets/bedroom.glb  948532 -> 881512  5110090d4c2a0508e2eb1666adc62c0d44c898a9a97437c1e72f8542eb555ed2
+M src/lib/boot/assets/plant-day.webp  70112 -> 31634  c789d244de14e003587c1b67a4fecb17309d31cf215300b9843dff9879457ce0
+M src/lib/boot/assets/plant-lamp.webp  41576 -> 19672  73b0a3e4f94ad7e8eaaa5d02995ed000c7ca566de18adf4dbaf2abcb6c5a0ce4
+M src/lib/boot/assets/room-day.webp  39964 -> 15460  35403ce7a62a2484d942ac3fa98409ed34413100e32cc4bed4095d0c3c83ba04
+M src/lib/boot/assets/room-lamp.webp  44830 -> 14400  fb1e818b24987d815821bc2f1a1d35fa667c32cb8077c48b8ba97e9eeb8a5f0e
+M src/lib/boot/assets/wall-day.webp  32898 -> 11188  fc1bd01b99a442194f8e76232e84b667243e49e4cf393ce4a4ca764918ad2033
+M src/lib/boot/assets/wall-lamp.webp  34172 -> 10052  45b454d83b323feee9f2773aacaf4b3480da3d17b90f40e7be7e8f7926e13a52
+# unchanged: 85 of 94 files (incl. props-day.webp, props-lamp.webp, all code, boot-atlas.png)

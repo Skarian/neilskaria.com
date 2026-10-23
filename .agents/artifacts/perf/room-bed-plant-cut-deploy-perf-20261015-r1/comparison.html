@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bed + floor-plant cut: c2s baseline vs cut-d-ring2</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1d1d1f; --muted: #6b6b70; --line: #d6d6db; --bg: #ffffff; --tag: #ececf0; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #e8e8ea; --muted: #9a9aa2; --line: #3a3a40; --bg: #18181b; --tag: #2a2a30; } }
+  body { margin: 0; padding: 24px; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; max-width: 1280px; }
+  h1 { font-size: 20px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 28px 0 8px; } p { margin: 6px 0; }
+  .muted { color: var(--muted); } .tag { display: inline-block; padding: 1px 8px; border-radius: 4px; background: var(--tag); font-size: 12px; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 8px 0 4px; }
+  figure { margin: 0; } figure img { width: 100%; height: auto; display: block; border: 1px solid var(--line); }
+  figcaption { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; margin: 6px 0; }
+  th, td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; } th { font-weight: 600; font-size: 12px; color: var(--muted); }
+  ul { margin: 6px 0; padding-left: 20px; }
+</style>
+</head>
+<body>
+<h1>Bed + floor-plant cut: is it worth merging?</h1>
+<p class="muted">2026-10-15 · <span class="tag">Baseline: current c2s preview 1byb9d6mi</span> vs <span class="tag">Candidate: cut-d-ring2 preview z1jbr6jar</span>. Only <code>bedroom.glb</code> differs (−42,918 B Brotli). Preview only, not merged.</p>
+
+<h2>Full-scene model views (GLB inspection, not the app camera)</h2>
+<p class="muted">Neutral lighting, no lightmaps, free camera. The app never shows these angles. The cut is meant to be visible here: it removes faces the app camera never reaches (bed foot and side, part of the pot's lower front, a few leaf cards).</p>
+<div class="pair">
+  <figure><img src="C:/projects/neilskaria.com/.agents/artifacts/perf/room-bed-plant-cut-20261014-r1/full-scene/BEFORE-wide-three-quarter-front-right.png" alt="Baseline c2s, wide three-quarter view"><figcaption>Baseline c2s · wide three-quarter front-right</figcaption></figure>
+  <figure><img src="C:/projects/neilskaria.com/.agents/artifacts/perf/room-bed-plant-cut-20261014-r1/full-scene/AFTER-wide-three-quarter-front-right.png" alt="Candidate cut-d-ring2, wide three-quarter view"><figcaption>Candidate cut-d-ring2 · same camera</figcaption></figure>
+</div>
+<div class="pair">
+  <figure><img src="C:/projects/neilskaria.com/.agents/artifacts/perf/room-bed-plant-cut-20261014-r1/full-scene/BEFORE-high-overhead-front.png" alt="Baseline c2s, high overhead view"><figcaption>Baseline c2s · high overhead front</figcaption></figure>
+  <figure><img src="C:/projects/neilskaria.com/.agents/artifacts/perf/room-bed-plant-cut-20261014-r1/full-scene/AFTER-high-overhead-front.png" alt="Candidate cut-d-ring2, high overhead view"><figcaption>Candidate cut-d-ring2 · same camera</figcaption></figure>
+</div>
+
+<h2>Bytes (certain)</h2>
+<table>
+  <tr><th></th><th>Baseline c2s</th><th>Candidate</th><th>Change</th></tr>
+  <tr><td>bedroom .glb.br as served</td><td>688,868</td><td>645,950</td><td>−42,918 (−6.2%)</td></tr>
+  <tr><td>Lighthouse total transfer, mobile (median)</td><td>1,594,324</td><td>1,551,303</td><td>−43,021 (−2.7%)</td></tr>
+  <tr><td>Lighthouse total transfer, desktop (median)</td><td>1,654,468</td><td>1,611,421</td><td>−43,047 (−2.6%)</td></tr>
+</table>
+
+<h2>Lighthouse 13.5.0 (3 + 3 runs per preset, order B,A,B,A,B,A): median (range)</h2>
+<table>
+  <tr><th>Metric</th><th>Mobile baseline</th><th>Mobile candidate</th><th>Desktop baseline</th><th>Desktop candidate</th></tr>
+  <tr><td>Performance score</td><td>61 (48–64)</td><td>61 (58–63)</td><td>93 (92–98)</td><td>94 (92–95)</td></tr>
+  <tr><td>FCP, ms</td><td>2016 (2011–2087)</td><td>2013 (2008–2015)</td><td>550 (484–559)</td><td>546 (544–565)</td></tr>
+  <tr><td>LCP (simulated), ms</td><td>9075 (6881–9081)</td><td>8703 (6784–8850)</td><td>1632 (588–1686)</td><td>1363 (1345–1659)</td></tr>
+  <tr><td>LCP (observed paint), ms</td><td>618 (585–1474)</td><td>579 (579–604)</td><td>650 (616–788)</td><td>631 (616–649)</td></tr>
+  <tr><td>Speed Index, ms</td><td>4261 (4260–5601)</td><td>4254 (4154–4426)</td><td>1427 (1425–1485)</td><td>1419 (1413–1451)</td></tr>
+  <tr><td>TBT, ms</td><td>421 (365–924)</td><td>429 (365–594)</td><td>34 (0.5–67)</td><td>19 (18–79)</td></tr>
+  <tr><td>CLS</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
+  <tr><td>Main-thread work, ms</td><td>4194 (4042–5468)</td><td>4090 (3991–4588)</td><td>1047 (1011–1097)</td><td>1063 (1022–1115)</td></tr>
+</table>
+<p class="muted">The ranges overlap for every timing metric. In all 12 runs the LCP element is the "NEIL SKARIA" H1 of the first-visit intro, not the room. Lighthouse therefore does not time the model at all.</p>
+
+<h2>Room-first readiness (real CDP throttling, 5 + 5 runs, alternating): median (range), ms</h2>
+<table>
+  <tr><th>Measure</th><th>Baseline c2s</th><th>Candidate</th><th>Median change</th><th>Pair changes (A − B)</th></tr>
+  <tr><td>START own introend (room usable)</td><td>11,529 (11,378–11,610)</td><td>11,354 (11,100–11,486)</td><td>−175</td><td>−24 / −125 / −356 / −428 / −146</td></tr>
+  <tr><td>GLB response end</td><td>6,554 (6,436–6,685)</td><td>6,330 (6,142–6,522)</td><td>−224</td><td>−89 / −32 / −294 / −435 / −336</td></tr>
+  <tr><td>Last private map end</td><td>8,113 (8,014–8,239)</td><td>7,886 (7,714–8,073)</td><td>−227</td><td>−102 / −40 / −300 / −430 / −351</td></tr>
+  <tr><td>Document responseStart</td><td>273 (89–369)</td><td>250 (132–467)</td><td>−23</td><td>+256 / +194 / −42 / −78 / −120</td></tr>
+  <tr><td>Long tasks, total</td><td>2,765 (2,690–2,870)</td><td>2,737 (2,634–2,832)</td><td>−28</td><td>+63 / −155 / +28 / −131 / +59</td></tr>
+</table>
+<p class="muted">Settings: 412×823, DPR 1.75, 150 ms latency, 1.6 Mbps down, 4× CPU. Returning-visitor state (boot-seen=1, room-place=room). Fresh profile and cache per run, warmed edges. The expected download saving is 42,918 B at 209,715 B/s, about 0.20 s. In this batch all 5 pairs were lower, with a median of −175 ms, which is about that size. But the ranges overlap, and server response jitter alone is about ±250 ms, so 5 pairs do not establish a speed gain beyond run-to-run variance.</p>
+
+<h2>Is the shipped asset visually the same?</h2>
+<ul>
+  <li><b>Hosted app captures</b> (production builds, settled camera) are at the baseline-repeat noise level. Phone-landscape lantern focus, review item F2: 19,114 px vs repeat 20,727 px, recaptured at rest. The same holds for room and focus views at 820×820 DPR 2.</li>
+  <li><b>Same-frame fixture check of the actual encoded GLB</b> (new): it is <b>not pixel-identical</b>. Draco re-quantization of the 7 re-encoded primitives shifts shading on the visible bed and pillow surfaces. Up to 71,218 px change at 1920×1080 cube focus. At least 99% of the changed pixels move by ≤ 2 of 255 levels, at most 31 px per pose move by more than 8, and the largest change is 25 (isolated edge pixels). No holes showed at the 17 tested poses. The pipeline control decoded c2s through the same path and gave 0 px difference.</li>
+</ul>
+
+<h2>Limits</h2>
+<ul>
+  <li>One Windows machine with emulated phones, and no physical device or Safari. Lighthouse mobile is a simulation. Do not compare these numbers with older Mac scores.</li>
+  <li>Coverage is finite samples, not a proof for every pose. Pointer drags past the canvas, aspect above about 3.9, and real DPR-3 phones are untested. Camera code changes would need fresh coverage.</li>
+  <li>The main-thread numbers are measurements, not proof of CPU cause either way. No FPS or animation claim is made.</li>
+</ul>
+</body>
+</html>

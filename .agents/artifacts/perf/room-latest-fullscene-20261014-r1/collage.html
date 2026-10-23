@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Room GLB: original vs latest c2s (inspection views)</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f4f3f0; --fg: #1d1c1a; --mut: #6b6862; --card: #fff; --line: #dedbd5; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #171716; --fg: #ecebe8; --mut: #a19d96; --card: #222120; --line: #34322f; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: clamp(14px, 3vw, 32px); background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  h1 { font-size: clamp(18px, 2.4vw, 24px); margin: 0 0 4px; font-weight: 650; }
+  .sub { color: var(--mut); margin: 0 0 18px; max-width: 72ch; }
+  .row { margin: 0 0 22px; }
+  .row h2 { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--mut); margin: 0 0 8px; font-weight: 600; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 760px) { .pair { grid-template-columns: 1fr; } }
+  figure { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  figure img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; background: #d9d9d9; }
+  figcaption { padding: 8px 12px; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+  figcaption b { font-weight: 650; }
+  figcaption span { color: var(--mut); font-variant-numeric: tabular-nums; }
+  .note { border-top: 1px solid var(--line); padding-top: 12px; color: var(--mut); font-size: 13px; max-width: 90ch; }
+  .note p { margin: 0 0 6px; }
+  code { font-size: 12px; }
+</style></head><body>
+<h1>Room GLB: original vs latest c2s</h1>
+<p class="sub">Whole-model inspection views, rendered with Three.js. These are not Blender or app screenshots. Each pair uses the same camera (1600×1000, DPR 1, FOV 40°, framed on the original bounds). Every mesh in each GLB is rendered, with nothing hidden or moved.</p>
+
+<section class="row"><h2>Wide · three-quarter front right</h2><div class="pair">
+  <figure><img src="file:///C:/projects/neilskaria.com/.agents/artifacts/perf/room-latest-fullscene-20261014-r1/full-scene/BEFORE-wide-three-quarter-front-right.png" alt="Original model, wide three-quarter view"><figcaption><b>Before · original</b><span>103 meshes · 223,809 tris · 4d83841d…</span></figcaption></figure>
+  <figure><img src="file:///C:/projects/neilskaria.com/.agents/artifacts/perf/room-latest-fullscene-20261014-r1/full-scene/AFTER-wide-three-quarter-front-right.png" alt="Latest c2s model, wide three-quarter view"><figcaption><b>After · latest c2s</b><span>83 meshes · 171,378 tris · 5110090d…</span></figcaption></figure>
+</div></section>
+
+<section class="row"><h2>High · overhead front</h2><div class="pair">
+  <figure><img src="file:///C:/projects/neilskaria.com/.agents/artifacts/perf/room-latest-fullscene-20261014-r1/full-scene/BEFORE-high-overhead-front.png" alt="Original model, high overhead view"><figcaption><b>Before · original</b><span>1,183,392 B raw</span></figcaption></figure>
+  <figure><img src="file:///C:/projects/neilskaria.com/.agents/artifacts/perf/room-latest-fullscene-20261014-r1/full-scene/AFTER-high-overhead-front.png" alt="Latest c2s model, high overhead view"><figcaption><b>After · latest c2s</b><span>881,512 B raw</span></figcaption></figure>
+</div></section>
+
+<div class="note">
+  <p><b>Inspection lighting:</b> a neutral hemisphere light (2.2) and a directional light (1.6), with no tone mapping. The app's baked lightmaps are not applied, so these views look flatter than the app and do not show how the room looks in the app.</p>
+  <p>The parts missing from After (duvet, far pillow, cushion, bed legs, rug, left and side walls, window, far curtain, rod and sky) are the visibility trim. The app camera was measured never to see them. c2s also simplifies the sheet fold and the plant pot. Full SHA-256 values, cameras and method are in <code>full-scene/NOTE.md</code>.</p>
+</div>
+</body></html>

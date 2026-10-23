@@ -1,0 +1,146 @@
+--- original/engine.ts
++++ validation/engine.ts
+@@ -12,7 +12,8 @@
+ import { bakedLighting, bakedMaterial, fillLightmap, type BakedLighting } from './baked-material';
+ import { fetchRoom } from './fetches';
+ import { createBonsai, growBonsai, swayTime } from './bonsai';
+-import { BOOT_DURATION, drawBootScreen } from './boot-screen';
++import { BOOT_DURATION } from './boot-screen';
++import { createBootAtlas } from './boot-atlas';
+ import { drawClockLED, drawFrequencyLED } from './clock-led';
+ import { FM_MIN } from '#lib/radio/stations.js';
+ import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
+@@ -147,14 +148,7 @@
+ 	camera.position.copy(view.eye);
+ 	camera.lookAt(view.target);
+ 
+-	const screenCanvas = document.createElement('canvas');
+-	screenCanvas.width = 960;
+-	screenCanvas.height = 640;
+-	const screenCtx = screenCanvas.getContext('2d')!;
+-	const screenTexture = new THREE.CanvasTexture(screenCanvas);
+-	screenTexture.colorSpace = THREE.SRGBColorSpace;
+-	screenTexture.flipY = false;
+-	const screenMaterial = new THREE.MeshBasicMaterial({ color: '#1d201d', toneMapped: false });
++	const gpuScreen = createBootAtlas(background);
+ 	const screenFade = { value: 0 };
+ 
+ 	// The clock radio shows the visitor's own time.
+@@ -344,7 +338,7 @@
+ 		if (/^Cube/.test(object.name)) object.position.y += 0.003;
+ 		if (object.material instanceof THREE.MeshStandardMaterial) live.push(object.material);
+ 	});
+-	screen.material = screenMaterial;
++	screen.material = gpuScreen.material;
+ 
+ 	// A framed pixel-art portrait (Neil, his wife and their dog) hanging on the wall above the clock
+ 	// radio, baked with the wall (its frame's shadow, the lantern's glow across it). The art is 180 x
+@@ -825,18 +819,67 @@
+ 		await breathe();
+ 	}
+ 	{
+-		// The variants that only appear later: the console's lit screen, a cut clump of foliage.
++		// The variant that only appears later: a cut clump of foliage.
+ 		const extras = new THREE.Scene();
+-		const lit = screenMaterial.clone();
+-		lit.map = screenTexture;
+-		extras.add(new THREE.Mesh(screen.geometry, lit));
+ 		const clump = bonsai.clump(0, 0);
+ 		if (clump) extras.add(clump);
+ 		compiling.push(renderer.compileAsync(extras, camera, scene));
+ 		clump?.geometry.dispose();
+ 	}
+ 	// The other pictures can keep downloading while shaders are submitted.
+-	await Promise.all([...lightmapsIn, portraitIn]);
++	try {
++		await Promise.all([...lightmapsIn, portraitIn, gpuScreen.ready]);
++	} catch (error) {
++		// Sound and the event loop are not initialized. Do not call the returned-room disposer.
++		disposed = true;
++		gpuScreen.dispose();
++		// Drain started decodes and compiles before disposal. Success adds no wait.
++		const settled = await Promise.allSettled([
++			...lightmapsIn,
++			portraitIn,
++			envIn,
++			sounding,
++			...compiling
++		]);
++		const audio = settled[lightmapsIn.length + 2];
++		if (audio.status === 'fulfilled') await (audio.value as Awaited<typeof sounding>).close();
++		const textures = new Set<THREE.Texture>([envMap, portraitArt, clockTexture]);
++		for (const group of Object.values(lighting)) {
++			textures.add(group.base);
++			textures.add(group.lamp);
++		}
++		scene.traverse((object) => {
++			if (object instanceof THREE.Mesh || object instanceof THREE.Points) {
++				object.geometry.dispose();
++				for (const material of [object.material].flat()) {
++					for (const value of Object.values(material))
++						if (value instanceof THREE.Texture) textures.add(value);
++					material.dispose();
++				}
++			}
++		});
++		for (const texture of textures) {
++			texture.dispose();
++			(texture.image as ImageBitmap | undefined)?.close?.();
++		}
++		mask.dispose();
++		maskMaterial.dispose();
++		occluderMaterial.dispose();
++		shootsMask.material.dispose();
++		shootsOccluder.material.dispose();
++		outlinePass.geometry.dispose();
++		outlinePass.material.dispose();
++		rubiks.dispose();
++		bonsai.dispose();
++		grower.terminate();
++		trail.remove();
++		for (const picker of pickers) picker.geometry.dispose();
++		clockMaterial.dispose();
++		renderer.setAnimationLoop(null);
++		renderer.dispose();
++		renderer.forceContextLoss();
++		throw error;
++	}
+ 	onProgress(0.9);
+ 	await breathe();
+ 	for (const group of Object.values(lighting)) {
+@@ -1065,9 +1108,7 @@
+ 	function power(on: boolean) {
+ 		ledMaterial?.emissive.set(on ? '#3dff6a' : '#000000');
+ 		if (ledMaterial) ledMaterial.emissiveIntensity = on ? 2 : 0;
+-		screenMaterial.color.set(on ? '#ffffff' : '#1d201d');
+-		screenMaterial.map = on ? screenTexture : null;
+-		screenMaterial.needsUpdate = true;
++		gpuScreen.power(on);
+ 	}
+ 
+ 	// Tints the lantern's baked light (and its glowing paper) towards a colour, at a brightness.
+@@ -1364,14 +1405,7 @@
+ 		}
+ 
+ 		if (s.boot >= 0 && !screenOff) {
+-			if (mode === 'returning') {
+-				// The lit screen (in the page's colour) fading to black as it switches off.
+-				screenCtx.fillStyle = background;
+-				screenCtx.fillRect(0, 0, screenCanvas.width, screenCanvas.height);
+-				screenCtx.fillStyle = `rgba(0, 0, 0, ${screenFade.value})`;
+-				screenCtx.fillRect(0, 0, screenCanvas.width, screenCanvas.height);
+-			} else drawBootScreen(screenCtx, s.boot, background);
+-			screenTexture.needsUpdate = true;
++			gpuScreen.prepare(s.boot, mode === 'returning', screenFade.value);
+ 		}
+ 		rubiks.sync();
+ 		renderer.render(scene, camera);
+@@ -2272,7 +2306,7 @@
+ 		bonsai.dispose();
+ 		trail.remove();
+ 		for (const picker of pickers) picker.geometry.dispose();
+-		screenTexture.dispose();
++		gpuScreen.dispose();
+ 		clockTexture.dispose();
+ 		renderer.dispose();
+ 		renderer.forceContextLoss();

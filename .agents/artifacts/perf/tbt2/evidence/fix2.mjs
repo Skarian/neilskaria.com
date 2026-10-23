@@ -1,0 +1,6 @@
+import fs from'node:fs';import{execFileSync}from'node:child_process';const repo='C:/projects/neilskaria.com-tbt2',p=repo+'/src/lib/boot/engine.ts';let s=execFileSync('git',['show','c9be94d:src/lib/boot/engine.ts'],{cwd:repo,encoding:'utf8'});s=s.replace('compiling.push(renderer.compileAsync(mesh, camera, scene));\n\t\tawait breathe();',`compiling.push(renderer.compileAsync(mesh, camera, scene));
+		// Send each shader to the GPU now, rather than waiting for the next texture upload to flush them.
+		renderer.getContext().flush();
+		await breathe();`);fs.writeFileSync(p,s);
+const native=process.env.TEMP+'/impl/tbt2/native.js';s=fs.readFileSync(native,'utf8').replace("'getProgramParameter','getActiveUniform'","'getProgramParameter','getProgramInfoLog','getShaderInfoLog','getActiveUniform'");fs.writeFileSync(native,s);
+const capture=process.env.TEMP+'/impl/tbt2/capture.mjs';s=fs.readFileSync(capture,'utf8').replace("console.log(name,kind,JSON.stringify(result),b.errors);","console.log(name,kind,JSON.stringify({ready:result.ready,tasks:result.tasks,native:result.native?.filter(x=>x.ms>20).map(({name,at,ms,width,height})=>({name,at,ms,width,height}))}),b.errors);");fs.writeFileSync(capture,s);

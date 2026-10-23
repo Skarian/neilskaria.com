@@ -1,0 +1,1 @@
+import fs from'node:fs';const p=process.env.TEMP+'/impl/tbt2/update-findings.mjs';let s=fs.readFileSync(p,'utf8'),from=s.lastIndexOf("s+='"),to=s.lastIndexOf("';fs.writeFileSync(old,s);");if(from<0||to<from)throw Error('append not found');s=s.slice(0,from)+'s+='+JSON.stringify(s.slice(from+4,to))+';fs.writeFileSync(old,s);\n';fs.writeFileSync(p,s);

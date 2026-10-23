@@ -1,0 +1,4 @@
+ .../source/src/lib/boot/assets/bedroom.glb         | Bin 1183392 -> 948532 bytes
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+
+GLB change: see candidate-model/trim.json, candidate-model/dropped-nodes.txt, tools/trim.mjs. Kept primitives/images byte-identical (candidate-model/validate.json).

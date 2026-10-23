@@ -1,0 +1,10 @@
+--- a/src/lib/boot/BootIntro.svelte
++++ b/src/lib/boot/BootIntro.svelte
+@@ -102,7 +102,6 @@
+ 		void tick().then(() => {
+ 			const panel = layer?.querySelector<HTMLElement>('.panel');
+ 			if (!panel) return;
+-			report();
+ 			observer = new ResizeObserver(report);
+ 			observer.observe(panel);
+ 		});

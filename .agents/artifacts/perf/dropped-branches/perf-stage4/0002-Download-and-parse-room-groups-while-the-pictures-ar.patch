@@ -1,0 +1,286 @@
+From aaab469e47dbc24295b4a7be32cb5e37a52014fb Mon Sep 17 00:00:00 2001
+From: Neil Skaria <neil.skaria@gmail.com>
+Date: Sun, 11 Oct 2026 00:43:15 -0500
+Subject: [PATCH 2/2] Download and parse room groups while the pictures arrive
+
+Co-Authored-By: GPT-6.1 Sol <noreply@openai.com>
+---
+ assets/3d/pack.mjs      | 34 +++++++++++++++++++++++--------
+ scripts/precompress.mjs |  8 +++++---
+ src/lib/boot/assets.ts  | 14 +++++++++++--
+ src/lib/boot/engine.ts  | 20 ++++++++++++++-----
+ src/lib/boot/fetches.ts | 44 +++++++++++++++++++++++------------------
+ 5 files changed, 83 insertions(+), 37 deletions(-)
+
+diff --git a/assets/3d/pack.mjs b/assets/3d/pack.mjs
+index b5c939e..9cef1f7 100644
+--- a/assets/3d/pack.mjs
++++ b/assets/3d/pack.mjs
+@@ -4,7 +4,8 @@
+ // portrait) and writes the files the site loads into src/lib/boot/assets/. Everything here was
+ // checked side by side against the export: the textures and lighting are smaller, not different.
+ //
+-//  - room-shell/sp/cube/clock/bonsai.glb: the room and four interactive groups, with colour textures to 512px WebP (the bonsai's wood 1024px), shapes re-compressed with
++//  - room-shell/sp/cube/clock/bonsai.glb: the room and four interactive groups, with colour textures
++//    to 512px WebP (the bonsai's wood 1024px), shapes re-compressed with
+ //    Draco once (positions at 14 bits), the cloth and a few soft shapes simplified, texture
+ //    coordinates dropped where nothing is textured. The bonsai's twigs are pinned to the trunk by
+ //    bonsai-roots.json; this checks the trunk they're pinned to is still where it was.
+@@ -74,7 +75,10 @@ const report = [];
+ // parts, sampled as the room samples the others (engine.ts's spread(): in a 20-cell grid over each
+ // part, one point a cell), from the positions as decoded, in the console's own space.
+ async function packConsoleHull(doc) {
+-	const sp = doc.getRoot().listNodes().find((node) => node.getName() === 'SP');
++	const sp = doc
++		.getRoot()
++		.listNodes()
++		.find((node) => node.getName() === 'SP');
+ 	const toConsole = new Matrix4().fromArray(sp.getWorldMatrix()).invert();
+ 	const points = [];
+ 	const nodes = [sp];
+@@ -126,7 +130,10 @@ async function packModel() {
+ 	const source = path(FROM, 'bedroom.glb');
+ 	const doc = await io.read(source);
+ 	const root = doc.getRoot();
+-	const wood = root.listNodes().find((n) => n.getName() === 'BonsaiWood')?.getMesh();
++	const wood = root
++		.listNodes()
++		.find((n) => n.getName() === 'BonsaiWood')
++		?.getMesh();
+ 
+ 	await doc.transform(fn.prune({ keepLeaves: true, keepAttributes: true }));
+ 	// Merge duplicate vertices, except on the trunk (the twigs' roots were taken from it as it is).
+@@ -184,8 +191,11 @@ async function packModel() {
+ 	);
+ 	// Split whole roots, keeping their children and the shared atlas coordinates in place.
+ 	const groupOf = (name) =>
+-		name === 'SP' ? 'sp' : /^(Cube|Clock|Bonsai)/.exec(name)?.[1].toLowerCase() ?? 'shell';
+-	const order = root.listScenes()[0].listChildren().map((node) => node.getName());
++		name === 'SP' ? 'sp' : (/^(Cube|Clock|Bonsai)/.exec(name)?.[1].toLowerCase() ?? 'shell');
++	const order = root
++		.listScenes()[0]
++		.listChildren()
++		.map((node) => node.getName());
+ 	let packed;
+ 	for (const group of ['shell', 'sp', 'cube', 'clock', 'bonsai']) {
+ 		const part = fn.cloneDocument(doc);
+@@ -247,15 +257,23 @@ async function packLightmaps() {
+ 			if (size) image = image.resize(size, size, { kernel: 'lanczos3' });
+ 			writeFileSync(out, await image.webp({ quality, smartSubsample: true, effort: 6 }).toBuffer());
+ 		}
+-		report.push(`${name}.webp ${kb(readFileSync(source).length)} -> ${kb(readFileSync(out).length)}`);
++		report.push(
++			`${name}.webp ${kb(readFileSync(source).length)} -> ${kb(readFileSync(out).length)}`
++		);
+ 	}
+ }
+ 
+ async function packEnvironment() {
+ 	const source = path(FROM, 'env.png');
+-	if (!existsSync(source)) return report.push('env.png not captured yet: run `npm run capture-env`');
++	if (!existsSync(source))
++		return report.push('env.png not captured yet: run `npm run capture-env`');
+ 	const out = path(TO, 'env.webp');
+-	writeFileSync(out, await sharp(readFileSync(source)).webp({ quality: 95, smartSubsample: true, effort: 6 }).toBuffer());
++	writeFileSync(
++		out,
++		await sharp(readFileSync(source))
++			.webp({ quality: 95, smartSubsample: true, effort: 6 })
++			.toBuffer()
++	);
+ 	report.push(`env ${kb(readFileSync(source).length)} -> ${kb(readFileSync(out).length)}`);
+ }
+ 
+diff --git a/scripts/precompress.mjs b/scripts/precompress.mjs
+index 6e97ae5..09a40fb 100644
+--- a/scripts/precompress.mjs
++++ b/scripts/precompress.mjs
+@@ -1,5 +1,5 @@
+-// After the build (on Vercel): a brotli-compressed copy of the room's model next to it, served as the
+-// model itself, compressed. Vercel compresses some kinds of file on its own, but not .glb, and the
++// After the build (on Vercel): a brotli-compressed copy of the room's models beside them, served as the
++// models themselves, compressed. Vercel compresses some kinds of file on its own, but not .glb, and the
+ // model is the biggest thing the room downloads. fetches.ts asks for this copy first, and falls back to
+ // the plain file if anything about it is off.
+ 
+@@ -14,7 +14,9 @@ if (!existsSync(`${OUTPUT}/config.json`)) {
+ 	process.exit(0);
+ }
+ const config = JSON.parse(readFileSync(`${OUTPUT}/config.json`, 'utf8'));
+-for (const file of readdirSync(ASSETS).filter((f) => /^bedroom\.[\w-]+\.glb$/.test(f))) {
++for (const file of readdirSync(ASSETS).filter((f) =>
++	/^room-(shell|sp|cube|clock|bonsai)\.[\w-]+\.glb$/.test(f)
++)) {
+ 	const glb = readFileSync(`${ASSETS}/${file}`);
+ 	const br = brotliCompressSync(glb, {
+ 		params: {
+diff --git a/src/lib/boot/assets.ts b/src/lib/boot/assets.ts
+index 78783ce..fac1f13 100644
+--- a/src/lib/boot/assets.ts
++++ b/src/lib/boot/assets.ts
+@@ -1,7 +1,11 @@
+ // The room's assets, imported as URLs so the build gives them content-hashed names and serves them
+ // with permanent cache headers.
+ 
+-import model from './assets/bedroom.glb?url';
++import shell from './assets/room-shell.glb?url';
++import sp from './assets/room-sp.glb?url';
++import cube from './assets/room-cube.glb?url';
++import clock from './assets/room-clock.glb?url';
++import bonsai from './assets/room-bonsai.glb?url';
+ import chime from './assets/gba-boot.mp3?url';
+ import portrait from './assets/portrait.webp?url';
+ import env from './assets/env.webp?url';
+@@ -23,4 +27,10 @@ export const lightmaps = Object.fromEntries(
+ 
+ export const lightmapScales: Record<string, Record<string, number>> = scales;
+ 
+-export const introAssets = { model, chime, portrait, env, lightmaps };
++export const introAssets = {
++	models: { shell, sp, cube, clock, bonsai },
++	chime,
++	portrait,
++	env,
++	lightmaps
++};
+diff --git a/src/lib/boot/engine.ts b/src/lib/boot/engine.ts
+index 2e8c864..273ae78 100644
+--- a/src/lib/boot/engine.ts
++++ b/src/lib/boot/engine.ts
+@@ -238,7 +238,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 	let disposed = false;
+ 
+ 	// Load everything up front, so nothing stutters once it's moving. The files are already on their
+-	// way (see fetches.ts): the model first, then the pictures, which arrive while the room is built.
++	// way (see fetches.ts): the shell first, then the objects and pictures together.
+ 	const files = fetchRoom();
+ 	const draco = new DRACOLoader().setDecoderPath('/draco/');
+ 	// (Its decoder comes from those downloads too.)
+@@ -249,12 +249,22 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 	const progress = setInterval(() => onProgress(files.progress() * 0.7), 100);
+ 	// The bonsai's grower (bonsai.worker.ts), started now so its code arrives alongside the model.
+ 	const grower = new Worker(new URL('./bonsai.worker.ts', import.meta.url), { type: 'module' });
+-	const gltf = await new GLTFLoader()
+-		.setDRACOLoader(draco)
+-		.parseAsync(await files.model.finally(() => clearInterval(progress)), '');
++	const loader = new GLTFLoader().setDRACOLoader(draco);
++	// Parse each group as it arrives, then restore the export's root order before building the room.
++	const parsing = Object.values(files.models).map(async (file) =>
++		loader.parseAsync(await file, '')
++	);
++	const growth = parsing[4].then((group) => growBonsai(group.scene, grower));
++	const groups = await Promise.all(parsing).finally(() => clearInterval(progress));
++	const gltf = groups[0];
++	for (const group of groups.slice(1)) gltf.scene.add(...[...group.scene.children]);
++	const order = gltf.scene.userData.roomOrder as string[];
++	gltf.scene.children.sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
++	delete gltf.scene.userData.roomOrder;
++	const growing = await growth;
++	gltf.scene.add(growing.turntable);
+ 	onProgress(0.75);
+ 	draco.dispose();
+-	const growing = growBonsai(gltf.scene, grower);
+ 	// Audio has a native setup cost: give it its own task while the pictures are downloading.
+ 	const sounding = breathe().then(() => createBootSound(files.chime, options.muted));
+ 	const lighting: Record<string, BakedLighting> = {};
+diff --git a/src/lib/boot/fetches.ts b/src/lib/boot/fetches.ts
+index 356dc04..491fcc3 100644
+--- a/src/lib/boot/fetches.ts
++++ b/src/lib/boot/fetches.ts
+@@ -1,7 +1,6 @@
+ // The room's files, downloaded as soon as the page knows it wants the room: before the room's own code
+-// has arrived, rather than one after another once it has. The model and its decoder go first; the
+-// pictures (lighting, the portrait) and the chime follow it, so the room's shapes can be built while
+-// they're still coming in. Each file is downloaded once and handed over as it is.
++// has arrived. The shell and decoder go first; the other shapes and pictures overlap while the shell
++// arrives. Each file is downloaded once and handed over as it is.
+ 
+ import { introAssets } from './assets';
+ 
+@@ -18,20 +17,20 @@ export function fetchRoom() {
+ }
+ 
+ function download() {
+-	const get = async (url: string) => {
+-		const response = await fetch(url);
++	const get = async (url: string, priority: RequestPriority = 'auto') => {
++		const response = await fetch(url, { priority });
+ 		if (!response.ok) throw new Error(`${url}: ${response.status}`);
+ 		return response;
+ 	};
+-	// The model, counting its bytes as they come (it's most of the wait).
++	// The models, counting their bytes as they come.
+ 	let loaded = 0;
+ 	let total = 0;
+ 	const read = (url: string) =>
+-		get(url).then(async (response) => {
++		get(url, 'high').then(async (response) => {
+ 			// (A compressed download's length is its compressed size, so this is only a guide.)
+-			total = Number(response.headers.get('content-length')) || 0;
+-			loaded = 0;
+-			if (!response.body || !total) return response.arrayBuffer();
++			const length = Number(response.headers.get('content-length')) || 0;
++			total += length;
++			if (!response.body || !length) return response.arrayBuffer();
+ 			const chunks: Uint8Array[] = [];
+ 			const reader = response.body.getReader();
+ 			for (;;) {
+@@ -46,26 +45,33 @@ function download() {
+ 	// unpacks as it arrives; if that's missing or comes out wrong, the model as it is.
+ 	const isModel = (bytes: ArrayBuffer) =>
+ 		new TextDecoder().decode(new Uint8Array(bytes, 0, Math.min(4, bytes.byteLength))) === 'glTF';
+-	const model = (
+-		import.meta.env.PROD
+-			? read(`${introAssets.model}.br`).then((bytes) => {
++	const model = (url: string) =>
++		(import.meta.env.PROD
++			? read(`${url}.br`).then((bytes) => {
+ 					if (!isModel(bytes)) throw new Error('compressed model unreadable');
+ 					return bytes;
+ 				})
+ 			: Promise.reject(new Error('development'))
+-	).catch(() => read(introAssets.model));
++		).catch(() => read(url));
++	const shell = model(introAssets.models.shell);
+ 	const decoder = {
+ 		js: get(DECODER.js).then((r) => r.text()),
+ 		wasm: get(DECODER.wasm).then((r) => r.arrayBuffer())
+ 	};
+-	// Everything else waits for the model, so it gets the connection to itself first.
+-	const after = model.then(
++	// Give the shell and decoder a head start, then overlap everything else.
++	const after = decoder.js.then(
+ 		() => undefined,
+ 		() => undefined
+ 	);
+ 	const blob = (url: string) => after.then(() => get(url)).then((r) => r.blob());
+ 	const result = {
+-		model,
++		models: {
++			shell,
++			sp: after.then(() => model(introAssets.models.sp)),
++			cube: after.then(() => model(introAssets.models.cube)),
++			clock: after.then(() => model(introAssets.models.clock)),
++			bonsai: after.then(() => model(introAssets.models.bonsai))
++		},
+ 		decoder,
+ 		lightmaps: Object.fromEntries(
+ 			Object.entries(introAssets.lightmaps).map(([name, url]) => [name, blob(url)])
+@@ -73,12 +79,12 @@ function download() {
+ 		portrait: blob(introAssets.portrait),
+ 		env: blob(introAssets.env),
+ 		chime: after.then(() => get(introAssets.chime)).then((r) => r.arrayBuffer()),
+-		// How much of the model has arrived (0-1).
++		// How much of the models has arrived (0-1).
+ 		progress: () => (total ? Math.min(1, loaded / total) : 0)
+ 	};
+ 	// Whoever uses a file reports its failure; none goes unhandled meanwhile.
+ 	for (const promise of [
+-		model,
++		...Object.values(result.models),
+ 		decoder.js,
+ 		decoder.wasm,
+ 		result.portrait,
+-- 
+2.24.1.windows.2
+

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+body{margin:0;background:transparent;color:var(--foreground);font-family:var(--font-sans)}h3{font-weight:500;margin:0 0 10px}table{width:100%;border-collapse:collapse;margin:0 0 20px}th,td{text-align:left;padding:9px 6px;border-bottom:1px solid var(--border);vertical-align:top}th{font-weight:500}.num{text-align:right;font-variant-numeric:tabular-nums}.range{display:block;color:var(--muted-foreground)}.presets{display:grid;grid-template-columns:1fr 1fr;gap:20px}.note{color:var(--muted-foreground);margin:0 0 16px}@media(max-width:600px){.presets{grid-template-columns:1fr}}
+</style></head><body>
+<h3>Cold room startup · throttled mobile test</h3>
+<div class="note">3 alternating runs per version · fresh profiles · 4× CPU slowdown</div>
+<table aria-label="Room readiness comparison"><thead><tr><th>Measured result</th><th class="num">Before</th><th class="num">After</th></tr></thead><tbody>
+<tr><td>START ready, median</td><td class="num">12.87 s<span class="range">12.76–13.02 s</span></td><td class="num">11.46 s<span class="range">11.29–11.58 s</span></td></tr>
+<tr><td>Private textures finished, median</td><td class="num">9.86 s</td><td class="num">8.06 s</td></tr>
+<tr><td>Mobile audit download</td><td class="num">1.875 MB</td><td class="num">1.594 MB</td></tr>
+</tbody></table>
+<div class="presets">
+<section><h3>Desktop Lighthouse</h3><table aria-label="Desktop Lighthouse median metrics"><thead><tr><th>Metric</th><th class="num">Before</th><th class="num">After</th></tr></thead><tbody>
+<tr><td>Performance</td><td class="num">89<span class="range">89–90</span></td><td class="num">92<span class="range">92–94</span></td></tr>
+<tr><td>LCP</td><td class="num">1.91 s</td><td class="num">1.70 s</td></tr>
+<tr><td>Speed Index</td><td class="num">1.45 s</td><td class="num">1.43 s</td></tr>
+<tr><td>Blocking time</td><td class="num">68 ms</td><td class="num">41 ms</td></tr>
+</tbody></table></section>
+<section><h3>Mobile Lighthouse</h3><table aria-label="Mobile Lighthouse median metrics"><thead><tr><th>Metric</th><th class="num">Before</th><th class="num">After</th></tr></thead><tbody>
+<tr><td>Performance</td><td class="num">49<span class="range">45–55</span></td><td class="num">57<span class="range">55–79</span></td></tr>
+<tr><td>LCP</td><td class="num">10.43 s</td><td class="num">9.08 s</td></tr>
+<tr><td>Speed Index</td><td class="num">5.00 s</td><td class="num">4.46 s</td></tr>
+<tr><td>Blocking time</td><td class="num">746 ms</td><td class="num">637 ms</td></tr>
+</tbody></table></section>
+</div>
+<div class="note">Medians from 3 runs per version and preset. Mobile scores and timings varied widely. Lighthouse measured the intro heading; room readiness was tested separately. Windows · Lighthouse 13.5.0 · Chrome 154.</div>
+</body></html>

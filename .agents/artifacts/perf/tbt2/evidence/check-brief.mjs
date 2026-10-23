@@ -1,0 +1,1 @@
+import fs from 'node:fs';const h=fs.readFileSync('C:/projects/neilskaria.com/.agents/artifacts/perf/tbt2/brief.html','utf8');fs.writeFileSync(process.env.TEMP+'/impl/tbt2/brief-check.mjs',h.match(/<script>([\s\S]*)<\/script>/)[1]);

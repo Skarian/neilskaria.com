@@ -1,0 +1,2 @@
+﻿import fs from 'node:fs';import {gunzipSync} from 'node:zlib';import {out} from './prepare.mjs';const n=process.argv[2]||'cpu-original';const e=JSON.parse(gunzipSync(fs.readFileSync(out+'/runs/'+n+'/trace.json.gz'))).traceEvents;const names={};for(const a of e)if(/RasterTask|RasterCHROMIUM|FireAnimationFrame/.test(a.name)){const k=a.name+'|'+a.ph;names[k]=(names[k]||0)+1}console.log(names);console.log(e.filter(a=>/RasterTask|RasterCHROMIUM|FireAnimationFrame/.test(a.name)).slice(0,8));
+

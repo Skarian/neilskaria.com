@@ -1,0 +1,1 @@
+import fs from'node:fs';const p='C:/projects/neilskaria.com-tbt2/vite.config.ts',s=fs.readFileSync(p,'utf8');fs.writeFileSync(p,s.replace('defineConfig({','defineConfig({\n\tcacheDir: \'.vite-tbt2\','));

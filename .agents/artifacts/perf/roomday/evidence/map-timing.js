@@ -1,0 +1,4 @@
+const blobs=new WeakMap(),bitmaps=new WeakMap();window.__mapUploads=[];
+const blob=Response.prototype.blob;Response.prototype.blob=async function(...a){const b=await blob.apply(this,a);const label=this.url.match(/(?:room|wall|bed|props|plant)-(?:day|lamp)/)?.[0];if(label)blobs.set(b,label);return b;};
+const bitmap=createImageBitmap;window.createImageBitmap=async function(...a){const b=await bitmap(...a),label=blobs.get(a[0]);if(label)bitmaps.set(b,label);return b;};
+const gl=WebGL2RenderingContext.prototype;for(const name of ['texSubImage2D','texImage2D']){const original=gl[name];gl[name]=function(...a){const source=a.find(x=>x instanceof ImageBitmap),label=bitmaps.get(source);if(!label)return original.apply(this,a);const at=performance.now(),r=original.apply(this,a),ms=performance.now()-at;__mapUploads.push({label,name,at,ms,width:source.width,height:source.height});performance.mark('map:'+label,{startTime:at});return r;};}

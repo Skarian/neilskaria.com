@@ -1,0 +1,124 @@
+diff --git a/src/lib/boot/BootIntro.svelte b/src/lib/boot/BootIntro.svelte
+index f586adc..57922fa 100644
+--- a/src/lib/boot/BootIntro.svelte
++++ b/src/lib/boot/BootIntro.svelte
+@@ -662,6 +662,9 @@
+ </div>
+ 
+ <style>
++ :global(.room-layer[data-proto-shell] canvas){opacity:1 !important;transition:none!important;}
++ :global(.room-layer[data-proto-shell] .loading){display:none !important;}
++
+ 	.room-layer {
+ 		display: none;
+ 		position: fixed;
+diff --git a/src/lib/boot/engine.ts b/src/lib/boot/engine.ts
+index 273ae78..6dbe631 100644
+--- a/src/lib/boot/engine.ts
++++ b/src/lib/boot/engine.ts
+@@ -129,7 +129,7 @@ export function startView(aspect: number) {
+ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 	const { canvas, layer, background, onProgress, onMode, onFocus, onCube, onBonsai } = options;
+ 
+-	const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
++	const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+ 	renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+ 	renderer.setSize(innerWidth, innerHeight, false);
+ 	renderer.toneMapping = THREE.ACESFilmicToneMapping;
+@@ -254,7 +254,63 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 	const parsing = Object.values(files.models).map(async (file) =>
+ 		loader.parseAsync(await file, '')
+ 	);
+-	const growth = parsing[4].then((group) => growBonsai(group.scene, grower));
++	const lighting: Record<string, BakedLighting> = {};
++	const lightmapsIn: Promise<void>[] = [];
++	for (const group of Object.keys(lightmapScales)) {
++		lighting[group] = bakedLighting(group, lightmapScales, lampTint);
++		lightmapsIn.push(fillLightmap(lighting[group].base, files.lightmaps[`${group}-day`]));
++		if (lightmapScales[group].lamp !== undefined)
++			lightmapsIn.push(fillLightmap(lighting[group].lamp, files.lightmaps[`${group}-lamp`]));
++	}
++
++    // Measurement-only partial scene. Shared geometry/maps; temporary materials.
++    // No controls or rebake, no artificial delays. The full controller still initializes below.
++    const partial=new THREE.Scene();
++    partial.background=scene.background;
++    const temporary: THREE.Material[]=[];
++    const clones=parsing.map(async (promise,i)=>{
++        const group=await promise;
++        performance.mark('diag-group-'+i+'-parsed');
++        const clone=group.scene.clone(true);
++        clone.traverse(object=>{
++            if(!(object instanceof THREE.Mesh))return;
++            const tag=object.userData.lightmap??object.parent?.userData.lightmap;
++            const source=object.material as THREE.MeshStandardMaterial;
++            if(tag && lighting[tag]) object.material=bakedMaterial(source,lighting[tag]);
++            else if(source.name==='LanternPaper')object.material=new THREE.MeshBasicMaterial({color:LANTERN_PAPER});
++            else object.material=new THREE.MeshBasicMaterial({map:source.map,color:source.color});
++            temporary.push(object.material);
++        });
++        return clone;
++    });
++    const growth = parsing[4].then((group) => growBonsai(group.scene, grower));
++    const reveal=(async()=>{
++        const shell=await clones[0];
++        await Promise.all(lightmapsIn);
++        partial.add(shell);
++        await renderer.compileAsync(partial,camera);
++        for(const item of Object.values(lighting)){
++            renderer.initTexture(item.base);await breathe();
++            renderer.initTexture(item.lamp);await breathe();
++        }
++        renderer.render(partial,camera);
++        if(options.startIn==='room' && document.documentElement.dataset.intro){
++            layer.dataset.protoShell='1';
++            performance.mark('diag-shell-drawn');
++            await new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>{
++                performance.mark('diag-shell-frame');resolve();
++            })));
++        }
++        // Add each available group independently, without making it wait for its neighbours.
++        await Promise.all(clones.slice(1).map(async(promise,i)=>{
++            const group=await promise;
++            partial.add(group);
++            await renderer.compileAsync(group,camera,partial);
++            await breathe();renderer.render(partial,camera);
++            performance.mark('diag-group-'+(i+1)+'-drawn');
++        }));
++    })();
++    await reveal;
+ 	const groups = await Promise.all(parsing).finally(() => clearInterval(progress));
+ 	const gltf = groups[0];
+ 	for (const group of groups.slice(1)) gltf.scene.add(...[...group.scene.children]);
+@@ -267,14 +323,6 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 	draco.dispose();
+ 	// Audio has a native setup cost: give it its own task while the pictures are downloading.
+ 	const sounding = breathe().then(() => createBootSound(files.chime, options.muted));
+-	const lighting: Record<string, BakedLighting> = {};
+-	const lightmapsIn: Promise<void>[] = [];
+-	for (const group of Object.keys(lightmapScales)) {
+-		lighting[group] = bakedLighting(group, lightmapScales, lampTint);
+-		lightmapsIn.push(fillLightmap(lighting[group].base, files.lightmaps[`${group}-day`]));
+-		if (lightmapScales[group].lamp !== undefined)
+-			lightmapsIn.push(fillLightmap(lighting[group].lamp, files.lightmaps[`${group}-lamp`]));
+-	}
+ 	scene.add(gltf.scene);
+ 
+ 	const sp = gltf.scene.getObjectByName('SP')!;
+@@ -894,6 +942,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 	renderer.render(scene, camera);
+ 	await breathe();
+ 
++	for(const material of temporary)material.dispose();
++	performance.mark('diag-complete-drawn');
+ 	const raycaster = new THREE.Raycaster();
+ 	addEventListener('resize', resize);
+ 	document.addEventListener('visibilitychange', updateLoop);
+@@ -2312,6 +2362,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 		landing.prepare();
+ 		renderer.render(scene, camera);
+ 	}
++	delete layer.dataset.protoShell;
+ 	setMode(mode);
+ 	emitCube();
+ 	return {

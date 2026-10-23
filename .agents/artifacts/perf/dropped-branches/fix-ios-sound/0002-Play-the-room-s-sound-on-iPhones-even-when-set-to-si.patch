@@ -1,0 +1,27 @@
+From 224d6029a11270fc77e322855f541d473c964d43 Mon Sep 17 00:00:00 2001
+From: Neil Skaria <neil.skaria@gmail.com>
+Date: Sun, 11 Oct 2026 17:14:53 -0500
+Subject: [PATCH 2/2] Play the room's sound on iPhones even when set to silent
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+---
+ src/lib/boot/sound.ts | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/lib/boot/sound.ts b/src/lib/boot/sound.ts
+index b5b1721..69f16a4 100644
+--- a/src/lib/boot/sound.ts
++++ b/src/lib/boot/sound.ts
+@@ -1,6 +1,9 @@
+ // Sound for the room: the boot chime, a click for the cartridge, and the cube's clacks. If the chime can't be loaded, a synthesized stand-in plays so the timing still lands.
+ 
+ export async function createBootSound(chimeFile: Promise<ArrayBuffer>, muted = false) {
++	// On an iPhone, play even with the ring switch on silent, as videos do.
++	const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
++	if (session) session.type = 'playback';
+ 	const ctx = new AudioContext();
+ 	// Everything plays through one master gain, so muting works instantly, even mid-chime.
+ 	const master = ctx.createGain();
+-- 
+2.24.1.windows.2
+

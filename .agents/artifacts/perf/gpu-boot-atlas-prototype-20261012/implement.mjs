@@ -1,0 +1,45 @@
+import fs from 'node:fs';
+import path from 'node:path';
+const out=path.resolve('.agents/artifacts/perf/gpu-boot-atlas-prototype-20261012'),stage=out+'/source-stage';
+const read=p=>fs.readFileSync(stage+'/'+p,'utf8').replaceAll('\r\n','\n');const write=(p,s)=>fs.writeFileSync(stage+'/'+p,s);
+let s=read('src/lib/boot/context-control.ts');s=`// Selects the fixed GPU atlas or the original Canvas2D context.\nconst selected = typeof window !== 'undefined' ? new URLSearchParams(location.search).get('bootCanvas') : null;\nexport const bootCanvasMode = selected === 'gpu-atlas' || selected === 'will-read-frequently' ? selected : 'default';\nexport const bootCanvasOptions = bootCanvasMode === 'will-read-frequently' ? {willReadFrequently:true} : undefined;\n`;write('src/lib/boot/context-control.ts',s);
+s=read('src/lib/boot/engine.ts').replace("import { bootCanvasOptions }", "import { createBootAtlas } from './boot-atlas';\nimport { bootCanvasMode, bootCanvasOptions }");
+const begin=s.indexOf("\tconst screenCanvas ="),end=s.indexOf('\n\tconst screenFade',begin);
+s=s.slice(0,begin)+`\tconst gpuScreen = bootCanvasMode === 'gpu-atlas' ? createBootAtlas(background) : undefined;
+ const screenCanvas = gpuScreen ? undefined : document.createElement('canvas');
+ if(screenCanvas){screenCanvas.width=960;screenCanvas.height=640;}
+ const screenCtx = screenCanvas ? (bootCanvasOptions ? screenCanvas.getContext('2d',bootCanvasOptions) : screenCanvas.getContext('2d'))! : undefined;
+ if(screenCtx)diag?.bootCanvas(screenCtx);
+ const screenTexture = screenCanvas ? new THREE.CanvasTexture(screenCanvas) : undefined;
+ if(screenTexture){
+  diag?.textureRequest('canvas');
+  screenTexture.onUpdate=()=>{diag?.textureSubmission('canvas');diag?.once('screen-texture-upload-submitted',{boot:s.boot,mode});};
+  diag?.mark('screen-texture-created',{width:960,height:640,context:bootCanvasMode});
+  screenTexture.colorSpace=THREE.SRGBColorSpace;screenTexture.flipY=false;
+ }
+ const screenMaterial = new THREE.MeshBasicMaterial({color:'#1d201d',toneMapped:false});`+s.slice(end);
+s=s.replace('screen.material = screenMaterial;','screen.material = gpuScreen?.material ?? screenMaterial;');
+s=s.replace('lit.map = screenTexture;','lit.map = screenTexture ?? null;');
+s=s.replace('extras.add(new THREE.Mesh(screen.geometry, lit));','if (!gpuScreen) extras.add(new THREE.Mesh(screen.geometry, lit));');
+s=s.replace('await Promise.all([...lightmapsIn, portraitIn]);','await Promise.all([...lightmapsIn, portraitIn, ...(gpuScreen ? [gpuScreen.ready] : [])]);');
+s=s.replace("\t\tscreenMaterial.color.set(on ? '#ffffff' : '#1d201d');", "\t\tif(gpuScreen){gpuScreen.power(on);return;}\n\t\tscreenMaterial.color.set(on ? '#ffffff' : '#1d201d');");
+s=s.replace('screenMaterial.map = on ? screenTexture : null;','screenMaterial.map = on ? screenTexture! : null;');
+s=s.replace("\t\t\tif (mode === 'returning') {\n\t\t\t\t// The lit screen", "\t\t\tif(gpuScreen){\n const pt=df?performance.now():0;gpuScreen.prepare(s.boot,mode==='returning',screenFade.value);if(df)df.gpuPrepareMs=performance.now()-pt;\n }else if (mode === 'returning') {\n\t\t\t\t// The lit screen");
+s=s.replaceAll('screenCtx.fill', 'screenCtx!.fill').replaceAll('screenCanvas.width, screenCanvas.height','screenCanvas!.width, screenCanvas!.height').replace('drawBootScreen(screenCtx,','drawBootScreen(screenCtx!,');
+s=s.replace('\t\t\tscreenTexture.needsUpdate = true;',"\t\t\tif(screenTexture){screenTexture.needsUpdate=true;diag?.textureRequest('canvas');}");
+s=s.replace('\t\trenderer.render(scene, camera);\n\t\tif (df)', "\t\trenderer.render(scene, camera);\n if(gpuScreen&&s.boot>=0&&!screenOff)gpuScreen.submitted(s.boot,mode==='returning');\n\t\tif (df)");
+s=s.replace('\t\tscreenTexture.dispose();','\t\tscreenTexture?.dispose();\n gpuScreen?.dispose();\n screenMaterial.dispose();');
+write('src/lib/boot/engine.ts',s);
+s=read('src/lib/boot/diagnostic.ts').replace("import { bootCanvasMode, bootCanvasOptions } from './context-control';", "import { bootCanvasMode, bootCanvasOptions } from './context-control';\nimport atlasMetrics from './boot-atlas-metrics.json';");
+s=s.replace('\tpaintMs: number;','\tpaintMs: number;\n gpuPrepareMs:number;');
+s=s.replace("\tlet glMetadata", " const textureCounts={canvas:{requests:0,submissions:0},atlas:{requests:0,submissions:0}};\n\tlet glMetadata");
+s=s.replace("\t\tconst expected = [", "\t\tconst canvasExpected = [");
+s=s.replace("\t\treturn {\n\t\t\tschemaVersion", " const expected=bootCanvasMode==='gpu-atlas'?['domain-draw-submitted',...Array.from({length:11},(_,i)=>i).filter(i=>i!==4).map(i=>'glyph-draw-submitted-'+i),'boot-animation-complete']:canvasExpected;\n\t\treturn {\n\t\t\tschemaVersion");
+s=s.replace("schemaRevision: 'canvas-context-control-1'", "schemaRevision: 'gpu-boot-atlas-1'");
+s=s.replace('mode: bootCanvasMode,\n',"mode: bootCanvasMode,\n sourceId:'canvas-control-93+gpu-atlas-prototype-20261012',\n atlas:bootCanvasMode==='gpu-atlas'?{path:'/boot-atlas.png',sha256:atlasMetrics.assetSha256,width:atlasMetrics.width,height:atlasMetrics.height}:null,\n textureCounts,\n markerSemantics:bootCanvasMode==='gpu-atlas'?'Atlas upload required once per session. Glyph/domain draw submissions required per full boot. No canvas paint/upload markers required. Completion is animation completion, not GPU completion.':'Canvas paint/upload submissions required per full boot. Completion is animation completion, not GPU completion.',\n atlasUploadObserved:bootCanvasMode==='gpu-atlas'?textureCounts.atlas.submissions>0:null,\n");
+s=s.replace("\t\t'The resolved glyph font", " 'GPU draw markers follow renderer.render. They establish renderer submission only, not GPU completion or physical display.',\n 'GPU mode paintMs stays zero. gpuPrepareMs measures CPU uniform preparation only. submitMs retains whole-scene submission timing.',\n 'Atlas fetch, decode, readiness and onUpdate timestamps use performance.now. No GPU timer queries or synchronous readbacks are used.',\n\t\t'The resolved glyph font");
+s=s.replace('\t\t\t\tresolvedGlyphFont:',"atlasProvenance:bootCanvasMode==='gpu-atlas'?'Offline Windows Chrome, platform spans report Arial Black. Android reference fallback may differ.':'not-applicable',\n\t\t\t\tresolvedGlyphFont:");
+s=s.replace('\t\tbootCanvas(ctx:'," textureRequest(kind:'canvas'|'atlas'){textureCounts[kind].requests++;if(kind==='atlas')once('atlas-upload-requested');},\n textureSubmission(kind:'canvas'|'atlas'){textureCounts[kind].submissions++;if(kind==='atlas')once('atlas-upload-submitted');},\n\t\tbootCanvas(ctx:");
+s=s.replace('\t\t\t\tpaintMs: 0,','\t\t\t\tpaintMs: 0,\n gpuPrepareMs:0,');
+write('src/lib/boot/diagnostic.ts',s);
+console.log('Patched isolated stage.');

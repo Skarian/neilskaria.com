@@ -1,0 +1,1 @@
+import {withServer,child} from './run.mjs';for(let run=4;run<=7;run++)for(const label of(run%2?['base18','candidate18']:['candidate18','base18']))await withServer(label,async()=>{console.log('READY',label,run);await child('phone.mjs',['http://localhost:4280/lab/boot',process.env.TEMP+'/impl/tbt2/'+label+'/phone','phone',String(run)])});

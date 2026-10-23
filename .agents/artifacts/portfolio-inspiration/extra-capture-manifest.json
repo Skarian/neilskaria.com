@@ -1,0 +1,38 @@
+[
+  {
+    "name": "cyze",
+    "resolved": "https://cyze.dev/",
+    "text": "Hi, I'm Blake\nProduct Engineer\n\nResearch, design, code, ship. Repeat.\n\nI currently lead product engineering at Avatone, from Ontario, Canada.\n\nI'm just here to make things that delight, whether that's matcha lattes or software.\n\nlearn a little bit about me\nlinkedin.com/in/blake-cyze\n\ngithub.com/blakecyze\n\nx.com/cyze_dev\n\nIndex\nFeatured\nProjects\nSnippets\nAvatone\nCRT Screen Zoom\nKoi Dither Pond\nBackrooms-Inspired Web Game\nDestiny 2 Weapon Database\n1-of-1 fashion archive\nOKLCH Gradient Editor\nSpotify Wrapped for GitHub\nHolographic Card Shader\nMade in Ontario, Canada\n637 matchas in, no plans to stop\nlinkedin.com/in/blake-cyze\ngithub.com/blakecyze\nx.com/cyze_dev\nBack to top\n\nBlake Cyze",
+    "links": [
+      {
+        "text": "CRT Screen Zoom",
+        "href": "https://cyze.dev/snippets/crt-screen-zoom/"
+      },
+      {
+        "text": "Koi Dither Pond",
+        "href": "https://cyze.dev/snippets/koi-dither-pond/"
+      },
+      {
+        "text": "Holographic Card Shader",
+        "href": "https://cyze.dev/snippets/holographic-card-shader/"
+      }
+    ]
+  },
+  {
+    "name": "pablo",
+    "resolved": "https://world.pablostanley.com/",
+    "text": "Pablo Stanley\n\nPablo Stanley is a designer and builder: Avataaars, Humaaans, Open Peeps, Robotos, Lummi, and a growing pile of AI design tools. His portfolio is a hand-drawn world you walk around. Arrow keys to move.\n\nWork\nAbout\nE\nPabs Haus\n0\nPablo Stanley\n/\nhilos\nsubstack\nx",
+    "links": []
+  },
+  {
+    "name": "yichen",
+    "resolved": "https://yichenxie.com/",
+    "text": "Yichen Xie\n5 YOE\nDesigner + Engineer\npreviously\nMicrosoft Windows + Devices\nB.Des IxD\nUniversity of Washington\nProjects\nPlayground\nAbout\nview project\nDesign System\nAI Native\nCorporate\nConcept\nEnd-to-end\nStayPass\nMicrosoft\nMockordings\ninvoko.ai\nDim App\nArcade Brick\nUW Design 2022 Web\nMy local time\n10:48:59 PM CDT\n© 2026 Yichen Xie",
+    "links": [
+      {
+        "text": "Dim AppAn AI note-taking app that auto-tags and organizes your notes, shaped through a reusable design system and designed end to end.Design SystemEnd-to-end",
+        "href": "https://yichenxie.com/dim"
+      }
+    ]
+  }
+]

@@ -1,0 +1,5 @@
+﻿import fs from 'node:fs';import {gunzipSync} from 'node:zlib';import {out} from './prepare.mjs';
+const name=process.argv[2]||'cpu-original',d=JSON.parse(fs.readFileSync(out+'/runs/'+name+'/result.json')),s=JSON.parse(fs.readFileSync(out+'/runs/'+name+'/trace-summary.json')),m=JSON.parse(fs.readFileSync(out+'/measurements.json')).find(r=>r.name===name),e=JSON.parse(gunzipSync(fs.readFileSync(out+'/runs/'+name+'/trace.json.gz'))).traceEvents;
+console.log('phases',d.observer.phases,'startup',m.startup.navigationToStartDOM,m.startup.startIntroNativeComplete);
+const a=e.filter(e=>e.name==='Animation'&&e.pid===s.pid);const begins=a.filter(e=>e.ph==='b'&&e.args.data?.nodeName?.includes('BUTTON'));console.log(JSON.stringify(begins.map(b=>({begin:b.ts/1000-s.offset,args:b.args,id:b.id2,ends:a.filter(x=>x.ph==='e'&&JSON.stringify(x.id2)===JSON.stringify(b.id2)).map(x=>({end:x.ts/1000-s.offset,args:x.args}))})),null,2));console.log('text',JSON.stringify(m.text.map(t=>({run:t.run,raf:t.raf,present:t.headlessPresentationFeedback,top:t.cpuSamples.slice(0,5)})),null,2));
+

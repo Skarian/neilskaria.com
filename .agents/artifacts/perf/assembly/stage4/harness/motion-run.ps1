@@ -1,0 +1,3 @@
+$ErrorActionPreference='Stop';$env:NO_COLOR=$null
+Set-Location 'C:\projects\neilskaria.com-stage4';$scratch="$env:TEMP\impl\stage4";$env:PATH="$env:LOCALAPPDATA\node24\node-v24.21.0-win-x64;$env:PATH"
+try{python "$scratch\motion-hook.py";$ErrorActionPreference='Continue';npx vite build --sourcemap *> "$scratch\build-motion.log";$ErrorActionPreference='Stop';Copy-Item -Recurse .svelte-kit/output "$scratch\motion-output";powershell -NoProfile -File "$scratch\run.ps1" -Label motion -Kind controls;if($LASTEXITCODE -ne 0){throw 'Motion controls failed'}}finally{git restore --source=HEAD --worktree -- src/lib/boot/engine.ts}

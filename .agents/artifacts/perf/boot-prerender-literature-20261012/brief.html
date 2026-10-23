@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Boot pre-render literature brief</title>
+<style>
+:root { color-scheme: light dark; }
+body { margin:0; color:var(--foreground,#1b2430); background:var(--background,#fff); font:15px/1.55 var(--font-sans,system-ui,sans-serif); }
+main { max-width:1080px; margin:auto; padding:0 0 16px; }
+p { margin:0 0 14px; }
+.lead { font-size:20px; line-height:1.4; }
+.meta { color:var(--muted-foreground,#586578); font-size:12px; }
+a { color:var(--foreground,#1b2430); text-decoration:underline; text-underline-offset:2px; overflow-wrap:anywhere; }
+.cite { white-space:nowrap; font-size:12px; }
+code { font:0.92em var(--font-mono,monospace); overflow-wrap:anywhere; }
+table { border-collapse:collapse; width:100%; table-layout:fixed; margin:8px 0 16px; font-size:14px; }
+caption { text-align:left; font-weight:650; margin-bottom:8px; }
+th { text-align:left; background:var(--secondary,#edf1f6); }
+th,td { padding:12px 10px; vertical-align:top; border-bottom:1px solid var(--border,#d8dfe8); }
+th:first-child,td:first-child { padding-left:0; }
+th:last-child,td:last-child { padding-right:0; }
+td strong { display:inline-block; margin-bottom:5px; }
+ul,ol { margin:0 0 16px; padding-left:22px; }
+li { margin:0 0 8px; }
+summary { font-weight:650; cursor:pointer; margin-bottom:10px; }
+.sources { font-size:13px; }
+@media(max-width:560px) {
+ table,thead,tbody,tr,th,td { display:block; width:auto; }
+ thead { display:none; }
+ caption { display:block; width:100%; }
+ tr { border-top:2px solid var(--border,#d8dfe8); padding:8px 0; }
+ td { border:0; padding:5px 0; }
+ .lead { font-size:18px; }
+}
+@media print { body { color:#111; background:white; font-size:10pt; } details { display:block; } a { color:#174d7d; } tr { break-inside:avoid; } }
+</style></head><body><main>
+<p class="meta">Evidence brief · 12 October 2026 · Research only</p>
+<p class="lead"><strong>Pre-rendering can remove live Canvas2D text work. Blender export alone does not remove runtime rendering or prove a performance fix.</strong></p>
+<p>The strongest next prototype is a small, offline glyph atlas that the GPU draws directly. This recommendation is an architectural inference, not a benchmark result.</p>
+
+<p><strong>What the device evidence establishes.</strong> The supplied boot uses a 960 × 640 canvas for four seconds. It measures and paints text each frame, then marks the CanvasTexture dirty on every powered frame. GSAP separately controls the camera and GBA movement. The text and domain stay fixed.</p>
+<p>On Android Chrome 154 / Adreno 740, historical text intervals averaged 35–39 ms. One <code>willReadFrequently:true</code> capture averaged 16.7 ms, with a smoother user report. Solid-fill returns also improved. These cross-session results do not establish causality or isolate font drawing. The control retains a possible +176 ms room-create-to-ready increase and one 118.9 ms handoff gap. Candidate <code>d82230a</code> remains rejected. None of the three options below has a device benchmark.</p>
+
+<p><strong>What glTF actually exports.</strong> Blender converts recognized material nodes into glTF data. It does not automatically render an arbitrary screen shader into a movie. Core glTF stores static image textures and transform/morph keyframes. It neither serializes a JavaScript CanvasTexture producer nor defines playback scheduling. Animated PNG content does not become a portable screen animation. <a class="cite" href="https://docs.blender.org/manual/en/5.4/addons/scene_gltf2.html#exported-materials" aria-label="Blender online manual, glTF 2.0 (5.4)">[1]</a> <a class="cite" href="https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#animations" aria-label="Khronos glTF 2.0 specification">[2]</a></p>
+<p>The current online Blender manual lists <code>KHR_animation_pointer</code>. That extension can animate mutable properties, including material factors, when the exporter and reader support them. It does not bake arbitrary shader nodes, fonts, or changing canvas pixels. Thus, “glTF cannot animate materials” is too broad. Exported letter meshes still need runtime animation and drawing. A rendered movie or frame sequence needs a separate playback path. <a class="cite" href="https://docs.blender.org/manual/en/5.4/addons/scene_gltf2.html#exported-materials" aria-label="Blender online manual, glTF 2.0 (5.4)">[1]</a> <a class="cite" href="https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_animation_pointer/README.md#overview" aria-label="Khronos KHR_animation_pointer">[3]</a></p>
+
+<div class="comparison">
+<table>
+<caption>Three runtime paths</caption>
+<thead><tr><th>Asset and drawing</th><th>Cost and first use</th><th>Control and fidelity</th></tr></thead>
+<tbody>
+<tr>
+<td><strong>Video → VideoTexture</strong><br>Render only the screen content offline. Pass the video directly to Three.js, without an intermediate Canvas2D copy. Three.js manages frame updates. The GBA still needs scene rendering. <a class="cite" href="https://threejs.org/docs/pages/VideoTexture.html#update" aria-label="Three.js VideoTexture">[4]</a></td>
+<td>Download, demux, decoder initialization, decoded buffers, and texture consumption remain. Hardware decoding and zero-copy transfer are not guarantees. DOM texture uploads can require conversion and pipeline flushes. Encoded bytes and decoder memory need measurement. <a class="cite" href="https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/WebGL_best_practices#teximagetexsubimage_uploads_esp._videos_can_cause_pipeline_flushes" aria-label="Mozilla MDN, WebGL best practices">[5]</a> <a class="cite" href="https://developer.chrome.com/docs/chromium/videong#so_many_bits" aria-label="Chromium, Deep-dive: VideoNG">[8]</a></td>
+<td>A media clock adds synchronization work beside GSAP. Frame callbacks expose media timestamps but can arrive one display interval late. Replay or seeking can require decoder work. Reverse playback is not portable. Skipping should directly select the final app state. Check compression, colour, fine strokes, and transparency. <a class="cite" href="https://developer.mozilla.org/en-US/docs/Web/API/HTMLVideoElement/requestVideoFrameCallback#description" aria-label="Mozilla MDN, requestVideoFrameCallback()">[6]</a> <a class="cite" href="https://developer.mozilla.org/en-US/docs/Web/API/HTMLMediaElement/playbackRate#browser_compatibility" aria-label="Mozilla MDN, HTMLMediaElement.playbackRate">[7]</a></td>
+</tr>
+<tr>
+<td><strong>Complete frames → resident atlas / sequence</strong><br>Upload all frames once, then select a frame with texture coordinates or an array layer. One screen draw can sample the selected frame.</td>
+<td>Removes repeated uploads only while frames remain resident. Loading every frame moves decoding and upload cost into first use. Streaming reduces residency but restores recurring upload work. Texture dimensions need device limits. File compression does not imply equally small GPU storage. <a class="cite" href="https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/WebGL_best_practices#teximagetexsubimage_uploads_esp._videos_can_cause_pipeline_flushes" aria-label="Mozilla MDN, WebGL best practices">[5]</a></td>
+<td>Once resident, a frame index supports skip, replay, reverse, and GSAP time selection. Motion remains discrete at the authored frame rate. Lossless frames preserve the authored raster detail. Packing needs protection against sampling adjacent frames.</td>
+</tr>
+<tr>
+<td><strong>Static glyph / word atlas → GPU quads</strong><br>Upload fixed glyph images and layout once. A shared text batch draws quads. Time and colour inputs drive transformations, glint, and fade. No canvas repaint or recurring pixel upload occurs.</td>
+<td>One image decode/upload, small geometry, and shader first use remain. GPU drawing and blending still cost time. Atlas batching reduces draw submissions. Cost follows atlas dimensions and visible glyphs, rather than four seconds of stored frames. <a class="cite" href="https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/WebGL_best_practices#teximagetexsubimage_uploads_esp._videos_can_cause_pipeline_flushes" aria-label="Mozilla MDN, WebGL best practices">[5]</a></td>
+<td>A shared boot time supports deterministic skip, replay, and reverse. Independent letter motion requires glyph regions, not only a whole-word image. Fixed masks remove runtime font measurement. Authoring must preserve font metrics, filtering, and the original motion.</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<p><strong>Storage arithmetic, not measured allocation.</strong> One uncompressed RGBA8 frame uses 960 × 640 × 4 = 2,457,600 bytes, or 2.344 MiB. Four seconds at 30 fps require 120 frames, or 281.25 MiB. At 60 fps, 240 frames require 562.5 MiB. These figures exclude padding, mipmaps, CPU copies, and driver overhead. GPU compression changes the figures. Video file size depends on encoding. A glyph atlas stores each required shape once. Its actual dimensions and compressed bytes remain unknown.</p>
+
+<p><strong>Shared constraints.</strong> Blender typography and colour output need visual comparison with the current screen. Matching font names alone is insufficient evidence of matching pixels. Every option needs an application-controlled blend to runtime <code>endColor</code>. Powered returns should use that solid screen state without canvas repaint or dirty flags. Replacing only the four-second text segment leaves the recurring solid-fill path intact. Keep camera and GBA motion under their existing GSAP control.</p>
+
+<p><strong>One next prototype.</strong> Test an offline alpha atlas of the moving letters plus the fixed domain, with precomputed layout. Draw batched glyph quads directly in the GBA screen plane, clipped to its bounds. Use the existing boot time for shader motion, colour, glint, and fade. Keep the existing background with runtime <code>endColor</code>. Target one shared text batch. Do not add an intermediate render target.</p>
+<p>This removes both repeated text rasterization and repeated canvas transfers, including powered returns. It introduces neither a video clock nor hundreds of frame textures. Unlike <code>d82230a</code>, it never repaints cached masks into a canvas. It does require shader and fidelity work. Generate the atlas offline. Do not generate frames, measure fonts, prepare panels, or add hidden warm draws during startup. Resource loading and first use still count as costs.</p>
+
+<p><strong>Acceptance measurements for that prototype.</strong> Compare it with the current canvas control in five alternating cold trials per variant on the affected phone. Include first boot, replay, and one powered return in each trial. Use the same display rate, build conditions, and cache policy. The historical default and rejected candidate are not acceptance baselines.</p>
+<ul>
+<li>Record navigation-to-START, room-create-to-ready, first activation, and pre-START long tasks. Reject a repeatable increase beyond control variation. Do not conceal preparation before START.</li>
+<li>For the current 60 Hz conditions, target approximately 16.7 ms mean intervals and p95 ≤20 ms during text and powered returns. Require no ≥42 ms interval in those phases. Record handoff maxima separately and reject a recurring &gt;50 ms gap.</li>
+<li>Record transferred bytes, decoded texture allocation estimates, first upload, and shader first-use time. Check zero recurring CanvasTexture uploads for boot and solid returns. Do not label JavaScript heap size as GPU memory.</li>
+<li>Compare synchronized screen recordings for font edges, spacing, glint, colour, and the final fade. Check skip, replay, reverse, and GSAP alignment within one display interval. Retain the simpler control if the prototype provides no material benefit.</li>
+</ul>
+
+<p><strong>Evidence limits.</strong> Documentation supports mechanisms, not an expected speedup on this phone. VideoNG dates to September 2021. Its overlay and power examples concern browser video presentation, not this WebGL texture path. The core glTF document dates to 2021 and needs the later pointer extension caveat. Current Three.js and MDN pages do not establish the behaviour of this app’s installed versions. The Blender 5.4 online manual is documentation evidence, not an installed-exporter test. Its indexed primary text was accessible, while direct fetches returned HTTP 402. No neural-video papers or secondary performance anecdotes support this recommendation.</p>
+
+<details open>
+<summary>Eight primary sources and exact supporting sections</summary>
+<ol class="sources"><li><a href="https://docs.blender.org/manual/en/5.4/addons/scene_gltf2.html#exported-materials">Blender online manual, glTF 2.0 (5.4)</a>. “Exported Materials” and “Extensions.” Recognized node conversion and listed KHR_animation_pointer support.</li><li><a href="https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#animations">Khronos glTF 2.0 specification</a>. §2.6, §3.8.3 “Images,” and §3.11 “Animations.” Core image formats, ignored PNG animation, and application-owned playback.</li><li><a href="https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_animation_pointer/README.md#overview">Khronos KHR_animation_pointer</a>. “Overview → Motivation / Operation” and “Extension Usage.” Mutable properties and the required reader support.</li><li><a href="https://threejs.org/docs/pages/VideoTexture.html#update">Three.js VideoTexture</a>. “Code Example,” “generateMipmaps,” and “update().” Direct HTMLVideoElement input, default mipmap policy, and automatic texture updates.</li><li><a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/WebGL_best_practices#teximagetexsubimage_uploads_esp._videos_can_cause_pipeline_flushes">Mozilla MDN, WebGL best practices</a>. “Batch draw calls,” “Understand system limits,” “Consider compressed texture formats,” and “texImage/texSubImage uploads (esp. videos) can cause pipeline flushes.”</li><li><a href="https://developer.mozilla.org/en-US/docs/Web/API/HTMLVideoElement/requestVideoFrameCallback#description">Mozilla MDN, requestVideoFrameCallback()</a>. “Parameters” and “Description.” mediaTime, presentedFrames, processingDuration, video cadence, and synchronization limits.</li><li><a href="https://developer.mozilla.org/en-US/docs/Web/API/HTMLMediaElement/playbackRate#browser_compatibility">Mozilla MDN, HTMLMediaElement.playbackRate</a>. Opening description and “Browser compatibility.” Negative playback rates lack widespread support.</li><li><a href="https://developer.chrome.com/docs/chromium/videong#so_many_bits">Chromium, Deep-dive: VideoNG</a>. “Some terms and layout,” “So many bits,” and “Rendering.” Decode paths, transfer costs, overlays, and frame selection.</li></ol>
+</details>
+<p class="meta">Sources checked 12 October 2026. Local observation cross-check: <a href="../affected-canvas-control-independent-20261012/README.md">independent control review</a>. This brief contains no implementation or new performance measurements.</p>
+</main></body></html>

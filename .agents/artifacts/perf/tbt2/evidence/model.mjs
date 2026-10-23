@@ -1,0 +1,1 @@
+import fs from 'node:fs';const b=fs.readFileSync('C:/projects/neilskaria.com-tbt2/src/lib/boot/assets/bedroom.glb');const n=b.readUInt32LE(12),j=JSON.parse(b.subarray(20,20+n).toString());console.log({meshes:j.meshes.length,bufferViews:j.bufferViews.length,materials:j.materials.length,textures:j.textures.length,images:j.images.map(x=>({type:x.mimeType,view:x.bufferView}))});

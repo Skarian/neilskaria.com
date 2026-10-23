@@ -1,0 +1,12 @@
+import {readFileSync,writeFileSync} from 'node:fs';
+const dir='.agents/artifacts/perf/camera-conflict-fix';
+const path='src/lib/boot/engine.ts';
+const original=readFileSync(path,'utf8');writeFileSync(dir+'/engine-original.txt',original);
+let s=original.replace("\tfunction render(time: number) {", "\tfunction render(time: number) {\n\t\tconst profileStart = performance.now();");
+s=s.replace('\t\tlastRendered = time;', '\t\tlastRendered = time;\n\t\t(window as any).__profile.frames.push({t:performance.now(), raf:time, mode, focused, blend:focusBlend.value});');
+s=s.replace('\n\t}\n\n\tfunction resize() {','\n\t\t(window as any).__profile.frames.at(-1).cpu = performance.now()-profileStart;\n\t}\n\n\tfunction resize() {');
+s=s.replace('\tfunction focus(thing: Thing) {','\tfunction focus(thing: Thing) {\n\t\tconst profileStart = performance.now();');
+s=s.replace('\t\tonFocus(thing);','\t\tonFocus(thing);\n\t\t(window as any).__profile.ops.push({kind:"focus",thing,t:profileStart,d:performance.now()-profileStart});');
+s=s.replace('\t\tconst hit = raycaster.intersectObjects(pickers, false)[0];','\t\tconst profileStart=performance.now();\n\t\tconst hit = raycaster.intersectObjects(pickers, false)[0];\n\t\t(window as any).__profile.ops.push({kind:"pick",thing:hit?.object.userData.thing,t:profileStart,d:performance.now()-profileStart});');
+s=s.replace('\tsetMode(mode);\n\temitCube();','\t(window as any).__profile = {frames:[],ops:[]};\n\tObject.assign(window,{__probe:{camera,scene,THREE,renderer,pickers,state:()=>({mode,focused,blend:focusBlend.value}),unfocus,returnToRoom}});\n\tsetMode(mode);\n\temitCube();');
+writeFileSync(path,s);

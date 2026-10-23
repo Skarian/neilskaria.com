@@ -1,0 +1,21 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+const root=process.cwd(),out=path.resolve('.agents/artifacts/perf/affected-browser-firstboot'),stage=out+'/source-stage';
+const file=stage+'/src/lib/boot/diagnostic.ts';let s=fs.readFileSync(file,'utf8');
+s=s.replace("const key = run + ':' + kind;", "if (run > 2) return;\n const key = run + ':' + kind;");
+fs.writeFileSync(file,s);
+const modified=['src/lib/boot/engine.ts','src/lib/boot/boot-screen.ts','src/lib/boot/BootIntro.svelte','src/lib/boot/diagnostic.ts'];
+execFileSync(process.execPath,[root+'/node_modules/prettier/bin/prettier.cjs','--write','--plugin',root+'/node_modules/prettier-plugin-svelte/plugin.js',...modified],{cwd:stage,stdio:'inherit'});
+fs.copyFileSync(file,out+'/diagnostic-source.ts');
+fs.writeFileSync(stage+'/.vercelignore','/*\n!/src/\n!/public/\n!/scripts/\n!/package.json\n!/package-lock.json\n!/vite.config.ts\n!/vercel.json\n!/tsconfig.json\n!/.node-version\n!/.npmrc\n');
+const reference=JSON.parse(fs.readFileSync(out+'/reference-manifest.json'));
+const hash=b=>createHash('sha256').update(b).digest('hex');
+const upload=[...reference.files.map(e=>e.path),'src/lib/boot/diagnostic.ts','.vercelignore'];
+const entries=upload.map(p=>{const dest=path.resolve(stage,p);if(!dest.startsWith(path.resolve(stage)+path.sep)||fs.lstatSync(dest).isSymbolicLink()||!fs.statSync(dest).isFile())throw Error('Unsafe file '+p);const b=fs.readFileSync(dest),sha256=hash(b),old=reference.files.find(e=>e.path===p);if(old&&!modified.includes(p)&&old.referenceSha256!==sha256)throw Error('Unexpected mutation '+p);return {path:p,bytes:b.length,sha256,referenceSha256:old?.referenceSha256,diagnosticChange:modified.includes(p)};});
+fs.writeFileSync(out+'/source-manifest.json',JSON.stringify({reference:reference.revision,rejectedCandidate:'d82230a',target:'preview',stage,files:entries,excluded:['.agents','policy','research','user authoring assets','secrets','.git','node_modules','.svelte-kit','.vercel','generated output'],filesTotal:entries.length,bytesTotal:entries.reduce((a,b)=>a+b.bytes,0)},null,2));
+const schema={"$schema":"https://json-schema.org/draft/2020-12/schema",title:'First boot diagnostic',type:'object',required:['schemaVersion','label','reference','sessionId','timeOrigin','metadata','supported','limits','counts','completion','unobserved','events','frames','longtasks','errors','navigation','resources'],properties:{schemaVersion:{const:1},label:{const:'FIRST-BOOT DIAGNOSTIC'},reference:{const:reference.revision},sessionId:{type:'string'},timeOrigin:{type:'number'},deviceName:{type:'string',maxLength:80},metadata:{type:'object',required:['browser','viewport','fonts','renderer']},supported:{type:'object',required:['longtask','fonts','resourceTiming']},limits:{type:'array',items:{type:'string'}},counts:{type:'object',required:['runs','events','frames','longtasks','errors']},completion:{type:'object',required:['first','return','replay'],properties:{first:{type:'boolean'},return:{type:'boolean'},replay:{type:'boolean'}}},unobserved:{type:'array'},events:{type:'array',maxItems:1000,items:{type:'object',required:['kind','t','run'],properties:{kind:{type:'string'},t:{type:'number'},run:{type:'integer'}}}},frames:{type:'array',maxItems:3000,items:{type:'object',required:['t','raf','boot','mode','run','phase','gapMs','paintMs','submitMs','totalMs','recorderMs'],properties:{t:{type:'number'},raf:{type:'number'},boot:{type:'number'},run:{type:'integer'},mode:{enum:['booting','returning']},phase:{enum:['camera-before-power','activation','arrival','drop','colour-glint','fade','return']},gapMs:{type:['number','null']},paintMs:{type:'number'},submitMs:{type:'number'},totalMs:{type:'number'},recorderMs:{type:'number'}}}},longtasks:{type:'array',maxItems:500},errors:{type:'array',maxItems:100},navigation:{type:'array'},resources:{type:'array',maxItems:200}}};
+fs.writeFileSync(out+'/capture.schema.json',JSON.stringify(schema,null,2));
+
+console.log(JSON.stringify({files:entries.length,bytes:entries.reduce((a,b)=>a+b.bytes,0)}));

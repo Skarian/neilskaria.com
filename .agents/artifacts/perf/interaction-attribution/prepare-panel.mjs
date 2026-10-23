@@ -1,0 +1,22 @@
+﻿import fs from 'node:fs';import {execFileSync}from 'node:child_process';
+execFileSync(process.execPath,['.agents/artifacts/perf/interaction-attribution/prepare.mjs']);
+let p='src/lib/boot/BootIntro.svelte',s=fs.readFileSync(p,'utf8');
+s=s.replace("let focused = $state<Thing | null>(null);","let focused = $state<Thing | null>(null);\n let diagnosticPanelReady=$state(true);\n let diagnosticPanelTimer: ReturnType<typeof setTimeout>;");
+s=s.replace("if (!focused) return;","if (!focused || !diagnosticPanelReady) return;");
+s=s.replaceAll("{#if focused === 'lantern'}","{#if focused === 'lantern' && diagnosticPanelReady}");
+s=s.replaceAll("{#if focused === 'clock'}","{#if focused === 'clock' && diagnosticPanelReady}");
+const old='\t\t\t\tfocused = thing;';
+if(!s.includes(old))throw Error('missing focus callback');
+s=s.replace(old,` focused = thing;
+ const a=(window as any).__attrib;
+ clearTimeout(diagnosticPanelTimer);
+ diagnosticPanelReady=true;
+ if(a?.variant==='P'&&thing){
+  diagnosticPanelReady=false;
+  queueMicrotask(()=>{for(const entry of a.replay[thing]||[])engine?.setFree(entry.side,entry.fraction);});
+  diagnosticPanelTimer=setTimeout(()=>diagnosticPanelReady=true,1400);
+ }`);
+fs.writeFileSync(p,s);
+p='src/lib/boot/engine.ts';s=fs.readFileSync(p,'utf8');
+s=s.replace("mode==='booting'&&s.boot>=.35&&s.boot<=3.5&&diagnostic.frames.length%4===0", "((mode==='booting'&&s.boot>=.35&&s.boot<=3.5)||(mode==='room'&&(focused||outline.thing)))&&diagnostic.frames.length%4===0");
+fs.writeFileSync(p,s);

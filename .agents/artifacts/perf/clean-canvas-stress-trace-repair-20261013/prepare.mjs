@@ -1,0 +1,20 @@
+﻿import fs from 'node:fs';import path from 'node:path';import {execFileSync} from 'node:child_process';import {createHash} from 'node:crypto';
+export const root=process.cwd(),out=path.resolve('.agents/artifacts/perf/clean-canvas-stress-trace-repair-20261013'),prior=path.resolve('.agents/artifacts/perf/clean-canvas-automated-profile-20261013');
+export const hash=b=>createHash('sha256').update(b).digest('hex');
+export const git=(...args)=>execFileSync('git',['--no-optional-locks',...args],{maxBuffer:80e6,windowsHide:true});
+export const write=(p,v)=>{fs.mkdirSync(path.dirname(out+'/'+p),{recursive:true});fs.writeFileSync(out+'/'+p,JSON.stringify(v,null,2))};
+export function tree(dir){const a=[];function walk(d){for(const f of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,f.name);if(f.isDirectory())walk(p);else if(f.isFile()){const b=fs.readFileSync(p);a.push({path:path.relative(dir,p).replaceAll('\\','/'),bytes:b.length,sha256:hash(b)})}else throw Error('unexpected link '+p)}}walk(dir);return a.sort((a,b)=>a.path.localeCompare(b.path))}
+export function state(){return {head:git('rev-parse','HEAD').toString().trim(),index:hash(fs.readFileSync('.git/index')),proposal:git('rev-parse','perf/lean-canvas-hint-review').toString().trim(),tracked:git('ls-files','-z').toString().split('\0').filter(Boolean).map(p=>({path:p,hash:fs.existsSync(p)?hash(fs.readFileSync(p)):null}))}}
+export function verify(){const checks=[];for(const v of ['original','hint']){const m=JSON.parse(fs.readFileSync(out+'/'+v+'/manifest.json'));for(const f of m.files)for(const base of [out,prior]){const b=fs.readFileSync(base+'/'+v+'/source/'+f.path);if(hash(b)!==f.sha256||!b.equals(git('show',m.commit+':'+f.path)))throw Error('source mismatch '+base+'/'+f.path)}const expected=JSON.parse(fs.readFileSync(out+'/'+v+'/build-copy-manifest.json'));for(const base of [out,prior])if(JSON.stringify(tree(base+'/'+v+'/source/.svelte-kit/output'))!==JSON.stringify(expected))throw Error('build mismatch '+base);checks.push({variant:v,exactGitFiles:m.files.length,sourceAndPriorUnchanged:true,copiedBuildFiles:expected.length,buildByteIdentity:true})}const after=state();write('state-after.json',after);const unchanged=JSON.stringify(after)===fs.readFileSync(out+'/state-before.json','utf8');if(!unchanged)throw Error('main state changed');write('verification.json',{checks,mainTrackedIndexHEADProposalUnchanged:unchanged,soleParent:git('rev-parse','bcc409e^').toString().trim()});return checks}
+if(process.argv[2]==='prepare'){
+fs.writeFileSync(out+'/state-before.json',JSON.stringify(state()));
+if(git('show','-s','--format=%P','bcc409e').toString().trim()!=='a796e9aea60def6e0849cb75a151fd6570942339')throw Error('parent');
+if(git('diff','--name-only','a796e9a','bcc409e').toString().trim()!=='src/lib/boot/engine.ts')throw Error('diff scope');
+fs.writeFileSync(out+'/exact-option.diff',git('diff','a796e9a','bcc409e','--','src/lib/boot/engine.ts'));
+for(const v of ['original','hint']){const m=JSON.parse(fs.readFileSync(prior+'/'+v+'/manifest.json'));if(m.files.length!==91)throw Error('count');write(v+'/manifest.json',m);for(const f of m.files){const b=fs.readFileSync(prior+'/'+v+'/source/'+f.path);if(hash(b)!==f.sha256||!b.equals(git('show',m.commit+':'+f.path)))throw Error('prior mismatch');const p=out+'/'+v+'/source/'+f.path;fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,b)}
+const build=prior+'/'+v+'/source/.svelte-kit/output';write(v+'/build-copy-manifest.json',tree(build));fs.cpSync(build,out+'/'+v+'/source/.svelte-kit/output',{recursive:true});}
+for(const f of ['hook.js','analyze.mjs','enrich.mjs','native-detail.mjs'])fs.copyFileSync(prior+'/'+f,out+'/'+f);
+write('prior-failures.json',['cpu-original','cpu-hint','network-original'].map(n=>({name:n,resultHash:hash(fs.readFileSync(prior+'/runs/'+n+'/result.json')),result:JSON.parse(fs.readFileSync(prior+'/runs/'+n+'/result.json'))})));
+write('copied-hook.json',{sha256:hash(fs.readFileSync(out+'/hook.js')),unchanged:true});console.log(verify());}
+if(process.argv[2]==='verify')console.log(verify());
+

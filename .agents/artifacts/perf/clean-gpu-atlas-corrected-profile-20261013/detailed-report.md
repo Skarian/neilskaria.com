@@ -1,0 +1,39 @@
+# Corrected atlas harness ? stopped at CPU4 preflight
+
+**No measured comparison ran. Candidate performance remains inconclusive.** The one separately owned, unmeasured actual-app CPU4 preflight passed real intro completion, clock alignment, full START/site/BACK/powered-return/replay/site, compressed delivery, phase alignment and trace transport. Observer overhead failed the gate. The four measured profiles were never created. No review preview advancement or release is justified by this stage.
+
+GPT-6.1 Sol, medium reasoning. Read repository guidance, web-perf skill, reassessment decision, prior failed harness/audits and independent clean source review. No children. T3 preview_status and preview_open returned explicit no host; used task-owned Chrome/CDP fallback. All work belongs to this folder. No runtime source, package, policy, checkout, index, ref, account setting or deployment change. No build/typecheck or completed lifecycle probe repeated.
+
+## Verified observer repairs
+
+Document capture listeners observe non-bubbling Svelte introstart/introend on each actual [data-start] identity, including return. Svelte dispatches introstart at the pop's on_begin after its dummy delay; introend is authoritative completion. Native intervals confirm both dummy and following pop share the button node identity. First pop ends at 3781.524 ms, introend 3782.100 ms, trusted click 3929.200 ms. Return pop ends at 15648.579 ms, introend 15649.200 ms, trusted replay click 15727.500 ms. No fixed app delay or finished-promise readiness. Polling and CDP dispatch explain event-to-input lag; no added asset/idle preparation.
+
+PerformanceMark.startTime supplies clock timestamps. Raw semantic paint/draw times remain separate; first-letter text windows align to their containing native FireAnimationFrame. Maximum residual **0.063 ms**, below the unchanged 0.5 ms requirement. No timestamp guessing. ReturnAsStream reached EOF, loss=false, 928623 trace events. No screenshot, video or pixel read during the app preflight.
+
+The tested hook (hook-preflight.js, SHA256 8e9eaf86b181bb3f41779b2df5a51cb12709e7aadfaa3be2d4f1b07d4b9ac524) removes query record creation and repeated phase list scans; uses existing uniform locations/writes with no reflection queries. It still intercepts 15 GL names and timestamps about 183?214 calls per text frame. Statistical V8 sampling is disabled. Trace categories and CPU lower/upper-bound methodology are retained in audit.mjs/analyze.mjs; nested API/service time is never summed as renderer CPU.
+
+## Decisive remaining blocker
+
+First 3150 ms text window: 187 observer frames, mean 1.132 ms, p95 2.000 ms, max **3.100 ms**; 106 frames at least 1 ms. Replay: 189 frames, mean 0.708 ms, p95 1.400 ms, max **2.100 ms**; 43 frames at least 1 ms. The clock/record bookkeeping remains substantial under CPU4 and can bias a CPU advantage or cadence judgment. These measurements cover wrapper/observer bookkeeping, exclude native call time, and remain bounded estimates subject to clock granularity. We do not silently accept them or promote preflight cadence/CPU into candidate evidence.
+
+Per instruction, stop before the matrix. hook.js contains a pending fast-path reduction for unrelated uniform writes and draws; node --check passes. It has **no browser validation**, and its unmeasured dispatch cost needs an explicit bound. observer-revision.json identifies that limitation. run.mjs requires the preflight audit to pass before any measured session; the current audit remains false. A new root decision is required for another actual-app validation session. The improvement and full bounded comparison are incomplete.
+
+## Exact identity and delivery
+
+Reuse the earlier validated original and atlas production output read-only. Both exact source allowlists remain verified: original 91 files at a796e9aea60def6e0849cb75a151fd6570942339 (accepted camera fix); atlas 94 files, digest a148564062b30b3fd51326eb023e3bbfa60bc49814323bb198051796092ed40c. Rejected main d82230acab7f4e2be780afd0847330a6926573d1 is protected, never served. Client emitted inventory hashes match; full client/SSR output hashes and protected Git/index/ref/tracked source/shared metadata are verified before/after. No dependency write or new junction was needed.
+
+Node24.21.0 at the requested absolute path; Chrome154, Radeon RX590 ANGLE Vulkan, 1280?800 DPR1, same flags, successful actual CPU4/network/cache commands retained in runs/preflight/measured-commands.json. Fresh owned preflight profile is excluded from all cold/warmed measured profiles. Initial storage is boot-seen=1 and room-place=room; final room-place=page reflects completed site. Actual network/cache and body hashes remain in result/analysis.
+
+Existing Brotli model served successfully with case-insensitive Content-Encoding br validation: encoded965768 bytes, decoded1183392 bytes, decoded SHA2564d83841d3b7892e9d4cdb0a2d47b574ccd30b58f52207575a6d91401a4861bf4. No compressed404/raw fallback. PNG37034 bytes, SHA256e7eb731d0e0ddeaa44e3d5cf0c700e05211bd2a595a908c3eade1c36b2fafc6e. One atlas 2048?1024 upload and mipmap, zero recurring boot upload/mipmap across first/replay/return; other asset updates are separate. texSubImage2D offsets are recorded as offsets; actual internal format/allocation not queried. Preflight decode/upload wall durations are retained, overlap startup, and are not additive GPU costs. Bitmap remains open in the successful session; browser exit is not proof of normal route disposal. Nominal atlas texture plus retained bitmap18.67 MiB versus original texture3.125 MiB remains a prior estimate; actual GPU execution/VRAM unknown.
+
+## Evidence, faults and cleanup
+
+runs/preflight/result.json is the raw collected-flow record; its valid=true means collection checks passed. Acceptance is exclusively runs/preflight/audit.json and decision-validation.json, which fail on observer overhead. Native trace, trace completion, clock residuals, full native button intervals, per-frame >=1 ms overhead, native task CPU bounds and service evidence are retained. No old session entered this analysis. run-manifest.json explicitly records **zero measured sessions** and all four unrun conditions. No derived O/A comparison exists.
+
+harness-faults.json preserves two failures before app launch: imported CDP helper argv side effect and invalid server ESM alias. runs/preflight-prelaunch retains failed server evidence. A third audit fault initially omitted the dummy by starting native interval search at introstart; audit-initial.json preserves the false flow result. Corrected audit searches from START DOM and confirms identity/completion without changing the overhead exclusion. No rejected auto-review action was bypassed. Initial directory creation was sandbox-denied; narrow authorized per-command auto-review succeeded.
+
+Prior fixed-animation-time fidelity methods were read. No new fidelity session or screenshot ran after the failed preflight; arrival/overlap/settled/glint/fade/off/return edges and clipping remain unvalidated here. Production outputs lack the prior exposed timeline controller; no diagnostic source/controller was added. Conditional corrected404 identity probe was not reached; its prior worker-count limitation remains. Safari/missed clicks and lantern/radio remain deferred.
+
+Owned Chrome exited0 without force, server terminated, and CDP9923/server4389 endpoint checks are in cleanup.json. Profiles and evidence remain only here. See verification.json and built-output-after.json for protected-state checks. No install, commit, push, deployment or runtime change.
+
+Reproduction uses the absolute Node executable with prepare.mjs snapshot, run.mjs preflight, analyze.mjs preflight, audit.mjs preflight, and finalize.mjs in this folder. Existing evidence/profile guards prevent reusing or replacing the consumed preflight. Do not launch measured sessions with the known failed audit.

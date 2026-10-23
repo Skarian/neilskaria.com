@@ -1,0 +1,147 @@
+diff --git "a/C:\\projects\\neilskaria.com\\.agents\\artifacts\\perf\\gpu-boot-atlas-failure-correction-20261012/before/src/lib/boot/boot-atlas.ts" "b/C:\\projects\\neilskaria.com\\.agents\\artifacts\\perf\\gpu-boot-atlas-prototype-20261012/source-stage/src/lib/boot/boot-atlas.ts"
+index ac3253e..abc1cde 100644
+--- "a/C:\\projects\\neilskaria.com\\.agents\\artifacts\\perf\\gpu-boot-atlas-failure-correction-20261012/before/src/lib/boot/boot-atlas.ts"
++++ "b/C:\\projects\\neilskaria.com\\.agents\\artifacts\\perf\\gpu-boot-atlas-prototype-20261012/source-stage/src/lib/boot/boot-atlas.ts"
+@@ -93,20 +93,31 @@ export function createBootAtlas(endColor: string) {
+ 		width: metrics.width,
+ 		height: metrics.height
+ 	});
+-	const ready = fetch('/boot-atlas.png').then(async (r) => {
++	let disposed = false;
++	const abort = new AbortController();
++	const ready = fetch('/boot-atlas.png', { signal: abort.signal }).then(async (r) => {
+ 		if (!r.ok) throw Error('Boot atlas HTTP ' + r.status);
+ 		const blob = await r.blob();
+ 		diag?.mark('atlas-fetch-end', { bytes: blob.size });
+ 		diag?.mark('atlas-decode-start');
+-		texture.image = await createImageBitmap(blob, {
++		const bitmap = await createImageBitmap(blob, {
+ 			premultiplyAlpha: 'none',
+ 			colorSpaceConversion: 'none'
+ 		});
++		if (disposed) {
++			bitmap.close();
++			throw Error('Boot atlas disposed before readiness');
++		}
++		texture.image = bitmap;
+ 		diag?.mark('atlas-decode-end');
+ 		texture.needsUpdate = true;
+ 		diag?.textureRequest('atlas');
+ 		diag?.mark('atlas-ready');
+ 	});
++	// Own rejection immediately. Readiness still rejects at the asset boundary.
++	void ready.catch((error: unknown) => {
++		diag?.mark('atlas-readiness-failed', { error: String(error), disposed });
++	});
+ 	function prepare(t: number, returning: boolean, fade: number) {
+ 		uniforms.returning.value = Number(returning);
+ 		uniforms.fade.value = returning ? fade : clamp((t - 3.5) / 0.45);
+@@ -165,6 +176,9 @@ export function createBootAtlas(endColor: string) {
+ 					diag?.once('glyph-draw-submitted-' + g.i, { boot: t, glyph: g.ch, index: g.i });
+ 		},
+ 		dispose() {
++			if (disposed) return;
++			disposed = true;
++			abort.abort();
+ 			texture.dispose();
+ 			(texture.image as ImageBitmap | undefined)?.close();
+ 			material.dispose();
+diff --git "a/C:\\projects\\neilskaria.com\\.agents\\artifacts\\perf\\gpu-boot-atlas-failure-correction-20261012/before/src/lib/boot/engine.ts" "b/C:\\projects\\neilskaria.com\\.agents\\artifacts\\perf\\gpu-boot-atlas-prototype-20261012/source-stage/src/lib/boot/engine.ts"
+index 8bbb56a..cf1fe62 100644
+--- "a/C:\\projects\\neilskaria.com\\.agents\\artifacts\\perf\\gpu-boot-atlas-failure-correction-20261012/before/src/lib/boot/engine.ts"
++++ "b/C:\\projects\\neilskaria.com\\.agents\\artifacts\\perf\\gpu-boot-atlas-prototype-20261012/source-stage/src/lib/boot/engine.ts"
+@@ -845,6 +845,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 			Number(b.material instanceof THREE.MeshStandardMaterial)
+ 	);
+ 	const compiling: Promise<unknown>[] = [];
++	let extraScreenMaterial: THREE.MeshBasicMaterial | undefined;
+ 	for (const mesh of preparing) {
+ 		// Reflections need their picture's dimensions to prepare the right shader.
+ 		if (mesh.material instanceof THREE.MeshStandardMaterial) await envIn;
+@@ -855,6 +856,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 		// The variants that only appear later: the console's lit screen, a cut clump of foliage.
+ 		const extras = new THREE.Scene();
+ 		const lit = screenMaterial.clone();
++		extraScreenMaterial = lit;
+ 		lit.map = screenTexture ?? null;
+ 		if (!gpuScreen) extras.add(new THREE.Mesh(screen.geometry, lit));
+ 		const clump = bonsai.clump(0, 0);
+@@ -863,7 +865,64 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 		clump?.geometry.dispose();
+ 	}
+ 	// The other pictures can keep downloading while shaders are submitted.
+-	await Promise.all([...lightmapsIn, portraitIn, ...(gpuScreen ? [gpuScreen.ready] : [])]);
++	try {
++		await Promise.all([...lightmapsIn, portraitIn, ...(gpuScreen ? [gpuScreen.ready] : [])]);
++	} catch (error) {
++		// Sound and the event loop are not initialized. Do not call the returned-room disposer.
++		disposed = true;
++		diag?.mark('room-initialization-failed', { error: String(error) });
++		gpuScreen?.dispose();
++		// Drain started decodes and compiles before disposal. Success adds no wait.
++		const settled = await Promise.allSettled([
++			...lightmapsIn,
++			portraitIn,
++			envIn,
++			sounding,
++			...compiling
++		]);
++		const audio = settled[lightmapsIn.length + 2];
++		if (audio.status === 'fulfilled') await (audio.value as Awaited<typeof sounding>).close();
++		const textures = new Set<THREE.Texture>([envMap, portraitArt, clockTexture]);
++		if (screenTexture) textures.add(screenTexture);
++		for (const group of Object.values(lighting)) {
++			textures.add(group.base);
++			textures.add(group.lamp);
++		}
++		scene.traverse((object) => {
++			if (object instanceof THREE.Mesh || object instanceof THREE.Points) {
++				object.geometry.dispose();
++				for (const material of [object.material].flat()) {
++					for (const value of Object.values(material))
++						if (value instanceof THREE.Texture) textures.add(value);
++					material.dispose();
++				}
++			}
++		});
++		for (const texture of textures) {
++			texture.dispose();
++			(texture.image as ImageBitmap | undefined)?.close?.();
++		}
++		mask.dispose();
++		maskMaterial.dispose();
++		occluderMaterial.dispose();
++		shootsMask.material.dispose();
++		shootsOccluder.material.dispose();
++		outlinePass.geometry.dispose();
++		outlinePass.material.dispose();
++		extraScreenMaterial?.dispose();
++		rubiks.dispose();
++		bonsai.dispose();
++		grower.terminate();
++		trail.remove();
++		for (const picker of pickers) picker.geometry.dispose();
++		screenMaterial.dispose();
++		clockMaterial.dispose();
++		renderer.setAnimationLoop(null);
++		renderer.dispose();
++		renderer.forceContextLoss();
++		diag?.mark('room-initialization-disposed');
++		throw error;
++	}
+ 	onProgress(0.9);
+ 	diag?.mark('assets-prepared');
+ 	await breathe();
+diff --git "a/C:\\projects\\neilskaria.com\\.agents\\artifacts\\perf\\gpu-boot-atlas-failure-correction-20261012/before/src/lib/boot/diagnostic.ts" "b/C:\\projects\\neilskaria.com\\.agents\\artifacts\\perf\\gpu-boot-atlas-prototype-20261012/source-stage/src/lib/boot/diagnostic.ts"
+index 1f594f7..9d3fa16 100644
+--- "a/C:\\projects\\neilskaria.com\\.agents\\artifacts\\perf\\gpu-boot-atlas-failure-correction-20261012/before/src/lib/boot/diagnostic.ts"
++++ "b/C:\\projects\\neilskaria.com\\.agents\\artifacts\\perf\\gpu-boot-atlas-prototype-20261012/source-stage/src/lib/boot/diagnostic.ts"
+@@ -132,7 +132,7 @@ function createDiagnostic() {
+ 			schemaRevision: 'gpu-boot-atlas-1',
+ 			experiment: {
+ 				mode: bootCanvasMode,
+-				sourceId: 'canvas-control-93+gpu-atlas-prototype-20261012-mip-grad',
++				sourceId: 'canvas-control-93+gpu-atlas-failure-correction-20261012',
+ 				atlas:
+ 					bootCanvasMode === 'gpu-atlas'
+ 						? {

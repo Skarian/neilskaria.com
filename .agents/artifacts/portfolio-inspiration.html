@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Personal site inspiration</title>
+<style>
+  :root {
+    --bg: var(--background, #fbf8f2);
+    --fg: var(--foreground, #26221d);
+    --copy-muted: var(--muted-foreground, #6f675d);
+    --line: var(--border, #e6dfd3);
+    --surface: var(--card, #ffffff);
+    --accent: var(--primary, #d9572b);
+    --chip: var(--muted, #f1ebe1);
+    --font: var(--font-sans, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: var(--background, #191714);
+      --fg: var(--foreground, #eee8de);
+      --copy-muted: var(--muted-foreground, #a69d90);
+      --line: var(--border, #34302a);
+      --surface: var(--card, #221f1b);
+      --accent: var(--primary, #f08a5d);
+      --chip: var(--muted, #2c2823);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 4px 0 20px; background: var(--bg); color: var(--fg); font: 14px/1.5 var(--font); }
+  a { color: inherit; }
+  .lede { margin: 0 0 12px; font-size: 15px; }
+  .lede b { color: var(--accent); }
+  .filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 18px; }
+  .filters button {
+    font: inherit; font-size: 13px; padding: 4px 11px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--line); background: transparent; color: var(--copy-muted);
+  }
+  .filters button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  h2 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--copy-muted); margin: 0 0 10px; font-weight: 600; }
+  section { margin-bottom: 22px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+  .thumb { position: relative; display: block; aspect-ratio: 16 / 10; overflow: hidden; background: var(--chip); border-bottom: 1px solid var(--line); }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; transition: transform .25s ease; }
+  .thumb:hover img { transform: scale(1.03); }
+  .pick { position: absolute; top: 8px; left: 8px; background: var(--accent); color: #fff; font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
+  .body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+  .name { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .name h3 { margin: 0; font-size: 15px; }
+  .w { font-size: 11.5px; padding: 1px 7px; border-radius: 999px; white-space: nowrap; background: var(--chip); color: var(--copy-muted); }
+  .w.yes { background: color-mix(in srgb, #3c9a5f 18%, transparent); color: #2f8a52; }
+  @media (prefers-color-scheme: dark) { .w.yes { color: #7fd09b; } }
+  .body p { margin: 0; color: var(--copy-muted); font-size: 13.5px; }
+  .links { margin-top: auto; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; font-weight: 600; }
+  .links a { text-decoration: none; border-bottom: 1px solid var(--line); }
+  .links a:hover { border-color: var(--accent); color: var(--accent); }
+  .bonus { border: 1px dashed var(--line); border-radius: 12px; padding: 10px 12px; color: var(--copy-muted); font-size: 13.5px; }
+  .bonus b { color: var(--fg); }
+  .note { font-size: 12px; color: var(--copy-muted); margin: 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<p class="lede">Nine personal sites that lean cute, crafted or a little Pixar, most with real writing. Start with the three marked <b>★</b>.</p>
+
+<div class="filters" role="group" aria-label="Filter sites">
+  <button data-f="all" aria-pressed="true">All</button>
+  <button data-f="writing" aria-pressed="false">Has writing</button>
+  <button data-f="world" aria-pressed="false">3D &amp; playful worlds</button>
+  <button data-f="x" aria-pressed="false">Recent X</button>
+</div>
+
+<section>
+  <h2>Getting attention on X lately</h2>
+  <div class="grid">
+
+    <article class="card" data-tags="writing world x">
+      <a class="thumb" href="https://world.pablostanley.com/" target="_blank" rel="noopener">
+        <img src="C:/projects/neilskaria.com/.agents/artifacts/portfolio-inspiration/pablo.png" alt="Hand-drawn black and white world with a smiling kettle house and small characters">
+        <span class="pick">★ Start here</span>
+      </a>
+      <div class="body">
+        <div class="name"><h3>Pablo Stanley</h3><span class="w yes">Substack</span></div>
+        <p>A hand-drawn black-and-white world with a smiling kettle house and tiny characters; you walk around with the arrow keys. His writing lives on a separate Substack.</p>
+        <p>Launched Sep 1: about 1.3k likes and 46k views on his post.</p>
+        <div class="links"><a href="https://world.pablostanley.com/" target="_blank" rel="noopener">Visit</a><a href="https://pablostanley.substack.com/" target="_blank" rel="noopener">Substack</a><a href="https://x.com/pablostanley/status/2094797787754082449" target="_blank" rel="noopener">X post</a></div>
+      </div>
+    </article>
+
+    <article class="card" data-tags="world x">
+      <a class="thumb" href="https://cyze.dev/snippets/crt-screen-zoom/" target="_blank" rel="noopener">
+        <img src="C:/projects/neilskaria.com/.agents/artifacts/portfolio-inspiration/cyze-demo.png" alt="Small yellow retro computer rendered in 3D on a pale blue page">
+      </a>
+      <div class="body">
+        <div class="name"><h3>Blake Cyze</h3><span class="w">Snippets, no blog</span></div>
+        <p>The image is his CRT demo: a cozy yellow computer built from 57 Blender stills and a CRT shader. His homepage itself is a minimal bio with a rainbow glow.</p>
+        <p>Posted Oct 1: about 1.4k likes and 145k views.</p>
+        <div class="links"><a href="https://cyze.dev/snippets/crt-screen-zoom/" target="_blank" rel="noopener">CRT demo</a><a href="https://cyze.dev/" target="_blank" rel="noopener">Portfolio</a><a href="https://x.com/cyze_dev/status/2105719967328919792" target="_blank" rel="noopener">X post</a></div>
+      </div>
+    </article>
+
+    <article class="card" data-tags="world x">
+      <a class="thumb" href="https://yichenxie.com/" target="_blank" rel="noopener">
+        <img src="C:/projects/neilskaria.com/.agents/artifacts/portfolio-inspiration/yichen.png" alt="Dark page of outlined bubbles joined by cream star shapes">
+      </a>
+      <div class="body">
+        <div class="name"><h3>Yichen Xie</h3><span class="w">No blog found</span></div>
+        <p>Dark and experimental: outlined bubbles stretch toward each other, with cream star shapes where they meet. More art piece than cute, but very tactile.</p>
+        <p>Posted Aug 14 (about 920 likes, 34k views); featured on Codrops Oct 6.</p>
+        <div class="links"><a href="https://yichenxie.com/" target="_blank" rel="noopener">Visit</a><a href="https://x.com/yichenxie_/status/2088166029260362219" target="_blank" rel="noopener">X post</a><a href="https://tympanus.net/codrops/2026/10/06/yichen-xie-portfolio/" target="_blank" rel="noopener">Codrops</a></div>
+      </div>
+    </article>
+
+  </div>
+</section>
+
+<section>
+  <h2>More sites worth exploring</h2>
+  <div class="grid">
+
+    <article class="card" data-tags="writing world">
+      <a class="thumb" href="https://www.joshwcomeau.com/" target="_blank" rel="noopener">
+        <img src="C:/projects/neilskaria.com/.agents/artifacts/portfolio-inspiration/josh.png" alt="Clay-style 3D character in a yellow hoodie under a rainbow arc and clouds">
+        <span class="pick">★ Start here</span>
+      </a>
+      <div class="body">
+        <div class="name"><h3>Josh W. Comeau</h3><span class="w yes">Blog</span></div>
+        <p>A soft clay-style Josh in a yellow hoodie sits under a rainbow, and the homepage is the blog. Closest match here to Pixar-ish plus serious writing.</p>
+        <div class="links"><a href="https://www.joshwcomeau.com/" target="_blank" rel="noopener">Visit &amp; blog</a><a href="https://www.joshwcomeau.com/blog/how-i-built-my-blog-v2/" target="_blank" rel="noopener">How he built it</a></div>
+      </div>
+    </article>
+
+    <article class="card" data-tags="writing world">
+      <a class="thumb" href="https://www.craftz.dog/" target="_blank" rel="noopener">
+        <img src="C:/projects/neilskaria.com/.agents/artifacts/portfolio-inspiration/craftz.png" alt="Voxel animal working at a tiny desk above a short bio">
+        <span class="pick">★ Start here</span>
+      </a>
+      <div class="body">
+        <div class="name"><h3>Takuya Matsuyama</h3><span class="w yes">Blog</span></div>
+        <p>A voxel creature at a tiny desk tops a plain, friendly bio. One charming 3D object carries the whole page. His separate blog has warm hand-drawn art.</p>
+        <div class="links"><a href="https://www.craftz.dog/" target="_blank" rel="noopener">Visit</a><a href="https://www.craftz.dog/posts" target="_blank" rel="noopener">Posts</a><a href="https://www.devas.life/" target="_blank" rel="noopener">Blog</a></div>
+      </div>
+    </article>
+
+    <article class="card" data-tags="writing">
+      <a class="thumb" href="https://www.seanhalpin.xyz/" target="_blank" rel="noopener">
+        <img src="C:/projects/neilskaria.com/.agents/artifacts/portfolio-inspiration/sean.png" alt="Mint rounded lettering and sparkles on deep green with pastel project tiles">
+      </a>
+      <div class="body">
+        <div class="name"><h3>Seán Halpin</h3><span class="w yes">Notes</span></div>
+        <p>Big rounded mint lettering, little sparkles and pastel project tiles. The notes section is real but small, five posts so far.</p>
+        <div class="links"><a href="https://www.seanhalpin.xyz/" target="_blank" rel="noopener">Visit</a><a href="https://www.seanhalpin.xyz/notes" target="_blank" rel="noopener">Notes</a></div>
+      </div>
+    </article>
+
+    <article class="card" data-tags="world">
+      <a class="thumb" href="https://www.maximeguillon.com/" target="_blank" rel="noopener">
+        <img src="C:/projects/neilskaria.com/.agents/artifacts/portfolio-inspiration/maxime.png" alt="Low-poly island with a pink beach house, palms and MAXIME'S WORLD lettering, with a scroll hint overlay">
+      </a>
+      <div class="body">
+        <div class="name"><h3>Maxime Guillon</h3><span class="w">No blog found</span></div>
+        <p>A tiny low-poly island with a pink beach house and bubbly "Maxime's World" lettering (the mouse icon is the site's scroll hint). Listed as a 2026 Web Design Awards winner in March.</p>
+        <div class="links"><a href="https://www.maximeguillon.com/" target="_blank" rel="noopener">Visit</a><a href="https://www.webdesignawards.io/nominees/maxime-s-portfolio" target="_blank" rel="noopener">Award listing</a></div>
+      </div>
+    </article>
+
+    <article class="card" data-tags="writing">
+      <a class="thumb" href="https://lynnandtonic.com/" target="_blank" rel="noopener">
+        <img src="C:/projects/neilskaria.com/.agents/artifacts/portfolio-inspiration/lynn.png" alt="Parchment page with ornate serif name and a storybook-style contents list">
+      </a>
+      <div class="body">
+        <div class="name"><h3>Lynn Fisher</h3><span class="w yes">Blog</span></div>
+        <p>Reads like the contents page of an old storybook. Resize the window and it stretches and squashes; her case study explains how.</p>
+        <div class="links"><a href="https://lynnandtonic.com/" target="_blank" rel="noopener">Visit</a><a href="https://lynnandtonic.com/thoughts/" target="_blank" rel="noopener">Thoughts</a><a href="https://lynnandtonic.com/thoughts/entries/case-study-2025-refresh/" target="_blank" rel="noopener">Case study</a><a href="https://lynnandtonic.com/archive/" target="_blank" rel="noopener">Past designs</a></div>
+      </div>
+    </article>
+
+    <article class="card" data-tags="writing">
+      <a class="thumb" href="https://maggieappleton.com/" target="_blank" rel="noopener">
+        <img src="C:/projects/neilskaria.com/.agents/artifacts/portfolio-inspiration/maggie.png" alt="Essay cards with hand-drawn illustrations of a candle and a baby beside a list of notes">
+      </a>
+      <div class="body">
+        <div class="name"><h3>Maggie Appleton</h3><span class="w yes">Essays &amp; notes</span></div>
+        <p>Warm serif essays, each with its own hand-drawn illustration. More illustrated magazine than Pixar, but the best model here for a writing-first site.</p>
+        <div class="links"><a href="https://maggieappleton.com/" target="_blank" rel="noopener">Visit &amp; read</a></div>
+      </div>
+    </article>
+
+  </div>
+</section>
+
+<section data-tags="world">
+  <div class="bonus"><b>Also: Bruno Simon.</b> The classic drive-a-toy-car 3D portfolio, rebuilt in 2025. Our live preview did not finish loading, so there's no screenshot. No blog found.
+    <span class="links" style="display:inline-flex;margin-left:4px"><a href="https://bruno-simon.com/" target="_blank" rel="noopener">Visit</a><a href="https://github.com/brunosimon/folio-2025" target="_blank" rel="noopener">Source</a></span>
+  </div>
+</section>
+
+<p class="note">Checked October 6, 2026. Like and view counts are approximate at lookup. "On X lately" means a specific dated post drew attention, not a popularity ranking.</p>
+
+<script>
+  const btns = document.querySelectorAll('.filters button');
+  btns.forEach(b => b.addEventListener('click', () => {
+    const f = b.dataset.f;
+    btns.forEach(o => o.setAttribute('aria-pressed', o === b));
+    document.querySelectorAll('.card, .bonus').forEach(c => {
+      const host = c.classList.contains('bonus') ? c.parentElement : c;
+      host.hidden = f !== 'all' && !(host.dataset.tags || '').split(' ').includes(f);
+    });
+    document.querySelectorAll('section').forEach(s => {
+      if (s.querySelector('.grid')) s.hidden = !s.querySelector('.card:not([hidden])');
+    });
+  }));
+</script>
+</body>
+</html>

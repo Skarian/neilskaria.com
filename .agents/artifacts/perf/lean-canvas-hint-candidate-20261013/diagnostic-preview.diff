@@ -1,0 +1,565 @@
+diff --git a/src/lib/boot/BootIntro.svelte b/src/lib/boot/BootIntro.svelte
+index ae48bda..83e7606 100644
+--- a/src/lib/boot/BootIntro.svelte
++++ b/src/lib/boot/BootIntro.svelte
+@@ -1,4 +1,5 @@
+ <script lang="ts">
++	import { diagnostic as diag } from './diagnostic';
+ 	import { onMount, tick } from 'svelte';
+ 	import { FM_MAX, FM_MIN, player, radio, STATIONS, STREAMS } from '#lib/radio/player.svelte.js';
+ 	import type { BonsaiState, CubeState, Room, RoomMode, Thing } from './engine';
+@@ -204,9 +205,13 @@
+ 			background,
+ 			muted: radio.muted,
+ 			startIn,
+-			onProgress: (value) => (progress = value),
++			onProgress: (value) => {
++				progress = value;
++				diag?.mark('progress', { value });
++			},
+ 			onMode,
+ 			onFocus: (thing) => {
++				diag?.focus(thing !== null);
+ 				// Picking up the clock radio switches it on (still inside the click, so sound can play);
+ 				// putting it down while it's only playing static switches it off.
+ 				if (thing === 'clock' && !radio.on) {
+@@ -370,6 +375,8 @@
+ 				onclick={start}
+ 				aria-label="Start: open the site"
+ 				data-start
++				onintrostart={() => diag?.mark('START-animation-start')}
++				onintroend={() => diag?.mark('START-animation-complete')}
+ 				in:pop={{ delay: 450 }}
+ 				out:pop={{ duration: 220 }}
+ 			>
+diff --git a/src/lib/boot/boot-screen.ts b/src/lib/boot/boot-screen.ts
+index ddc3851..ae814eb 100644
+--- a/src/lib/boot/boot-screen.ts
++++ b/src/lib/boot/boot-screen.ts
+@@ -1,3 +1,4 @@
++import { diagnostic as diag } from './diagnostic';
+ // Draws the boot screen for a given time, so the 3D screen texture can be scrubbed by GSAP.
+ // A replica of the GBA boot, measured frame by frame from a native capture (240 x 160), with our
+ // name in place of the logo and our domain in place of the line underneath:
+@@ -92,6 +93,7 @@ function drawWordmark(ctx: CanvasRenderingContext2D, t: number, w: number, h: nu
+ 		ctx.scale(scale, scale);
+ 		ctx.fillStyle = letterColour(t, seed, slotX / w);
+ 		ctx.fillText(letter, -ctx.measureText(letter).width / 2, 0);
++		diag?.once('glyph-painted-' + i, { glyph: letter, index: i, font: ctx.font, boot: t });
+ 		ctx.restore();
+ 	}
+ }
+@@ -109,6 +111,7 @@ function drawLine(ctx: CanvasRenderingContext2D, t: number, w: number, h: number
+ 	ctx.globalAlpha = appear;
+ 	ctx.fillStyle = rgb(MAGENTA);
+ 	ctx.fillText(LINE, x, y);
++	diag?.once('domain-painted', { font: ctx.font, boot: t });
+ 	ctx.globalAlpha = 1;
+ 
+ 	// A glint runs across the line just before the ding, briefly washing the letters out.
+diff --git a/src/lib/boot/context-control.ts b/src/lib/boot/context-control.ts
+new file mode 100644
+index 0000000..80a241b
+--- /dev/null
++++ b/src/lib/boot/context-control.ts
+@@ -0,0 +1,15 @@
++// This query selects only the actual boot-screen Canvas2D context.
++const requestedMode =
++	typeof window !== 'undefined' ? new URLSearchParams(location.search).get('bootCanvas') : null;
++if (
++	requestedMode !== null &&
++	requestedMode !== 'default' &&
++	requestedMode !== 'will-read-frequently'
++) {
++	throw new Error(
++		'Unsupported bootCanvas mode: ' + requestedMode + '. Use default or will-read-frequently.'
++	);
++}
++export const bootCanvasMode = requestedMode === 'default' ? 'default' : 'will-read-frequently';
++export const bootCanvasOptions =
++	bootCanvasMode === 'will-read-frequently' ? { willReadFrequently: true } : undefined;
+diff --git a/src/lib/boot/diagnostic.ts b/src/lib/boot/diagnostic.ts
+new file mode 100644
+index 0000000..d11cf44
+--- /dev/null
++++ b/src/lib/boot/diagnostic.ts
+@@ -0,0 +1,318 @@
++import { bootCanvasMode, bootCanvasOptions } from './context-control';
++type EventRecord = { kind: string; t: number; run: number; [key: string]: unknown };
++type Frame = {
++	t: number;
++	raf: number;
++	boot: number;
++	mode: string;
++	run: number;
++	phase: string;
++	gapMs: number | null;
++	paintMs: number;
++	submitMs: number;
++	totalMs: number;
++	recorderMs: number;
++};
++function createDiagnostic() {
++	const events: EventRecord[] = [],
++		frames: Frame[] = [],
++		longtasks: { t: number; duration: number }[] = [],
++		errors: { t: number; message: string }[] = [];
++	const seen = new Set<string>();
++	const dropped = { events: 0, frames: 0, longtasks: 0, errors: 0 };
++	let run = 0,
++		currentMode = 'loading',
++		lastFrame: number | null = null,
++		activation = false;
++	let glMetadata: Record<string, unknown> = {};
++	let bootCanvasAttributes: CanvasRenderingContext2DSettings | null = null;
++	let bootCanvasAttributesStatus: 'not-created' | 'supported' | 'unsupported' | 'failed' =
++		'not-created';
++	let panel: HTMLDetailsElement | undefined;
++	const sessionId = new Date().toISOString().replace(/[:.]/g, '-');
++	const push = <T>(a: T[], value: T, limit: number, key: keyof typeof dropped) => {
++		if (a.length < limit) a.push(value);
++		else dropped[key]++;
++	};
++	const mark = (kind: string, extra: Record<string, unknown> = {}) => {
++		if (kind === 'screen-material-power' && extra.on === true && currentMode === 'booting')
++			activation = true;
++		push(events, { kind, t: performance.now(), run, ...extra }, 1000, 'events');
++	};
++	const once = (kind: string, extra: Record<string, unknown> = {}) => {
++		if (run > 2) return;
++		const key = run + ':' + kind;
++		if (seen.has(key)) return;
++		seen.add(key);
++		mark(kind, extra);
++	};
++	const supported = {
++		longtask:
++			typeof PerformanceObserver !== 'undefined' &&
++			PerformanceObserver.supportedEntryTypes.includes('longtask'),
++		fonts: 'fonts' in document,
++		resourceTiming: typeof performance.getEntriesByType === 'function'
++	};
++	if (supported.longtask)
++		new PerformanceObserver((list) => {
++			for (const e of list.getEntries())
++				push(longtasks, { t: e.startTime, duration: e.duration }, 500, 'longtasks');
++		}).observe({ type: 'longtask', buffered: true });
++	const recordError = (message: string) =>
++		push(errors, { t: performance.now(), message: message.slice(0, 400) }, 100, 'errors');
++	addEventListener('error', (e) => recordError(e.message || 'Resource error'), true);
++	addEventListener('unhandledrejection', (e) => recordError(String(e.reason)));
++	document.addEventListener('visibilitychange', () =>
++		mark('visibility', { state: document.visibilityState })
++	);
++	document.addEventListener(
++		'click',
++		(e) => {
++			const n = e.target instanceof Element ? e.target.closest('button') : null;
++			if (n?.hasAttribute('data-start')) mark('START-gesture', { trusted: e.isTrusted });
++			else if (n?.textContent?.includes('BACK TO THE ROOM'))
++				mark('BACK-gesture', { trusted: e.isTrusted });
++		},
++		true
++	);
++	document.addEventListener(
++		'animationend',
++		(e) => {
++			if (e.target instanceof Element && e.target.matches('[data-start]'))
++				mark('START-css-animation-complete');
++		},
++		true
++	);
++	const observer = new MutationObserver(() => {
++		const start = document.querySelector('[data-start]');
++		if (start) once('START-DOM');
++	});
++	observer.observe(document, { childList: true, subtree: true });
++	mark('diagnostic-initialized');
++	const limits = [
++		'Engine submission and rAF timestamps do not establish displayed frames.',
++		'Texture onUpdate records upload submission. It does not measure GPU completion or native texture initialization.',
++		'Paint markers follow direct fillText calls. They do not establish glyph cache readiness or display presentation.',
++		'The resolved glyph font and physical refresh rate are unmeasured.',
++		'A webpage cannot collect a full GPU or native browser trace.',
++		'A reload restarts the session but does not clear OS, font, browser, or driver caches.',
++		'Detailed frames cover only the first two full boots and their return windows. Arrays are bounded.',
++		'Navigation and resources use browser timing buffers. Entries can be missing. Resource paths exclude query strings.'
++	];
++	function snapshot(deviceName = '') {
++		const expected = [
++			'domain-painted',
++			...Array.from({ length: 11 }, (_, i) => i)
++				.filter((i) => i !== 4)
++				.map((i) => 'glyph-painted-' + i),
++			'screen-texture-upload-submitted',
++			'boot-animation-complete'
++		];
++		return {
++			schemaVersion: 1,
++			schemaRevision: 'lean-canvas-hint-candidate-1',
++			sourceId: 'lean-canvas-hint-candidate-20261013',
++			experiment: {
++				mode: bootCanvasMode,
++				requestedContextOptions: bootCanvasOptions ?? null,
++				requestedContextOptionsOmitted: bootCanvasOptions === undefined,
++				contextAttributes: bootCanvasAttributes,
++				contextAttributesStatus: bootCanvasAttributesStatus
++			},
++			label: 'FIRST-BOOT DIAGNOSTIC',
++			reference: 'a796e9aea60def6e0849cb75a151fd6570942339',
++			cameraFix: '042dc805',
++			sessionId,
++			timeOrigin: performance.timeOrigin,
++			capturedAt: new Date().toISOString(),
++			deviceName: deviceName.trim().slice(0, 80),
++			metadata: {
++				browser: navigator.userAgent,
++				platform: navigator.platform,
++				viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
++				reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
++				visibility: document.visibilityState,
++				fonts: {
++					status: document.fonts?.status,
++					word: 'italic 900 "Arial Black", "Helvetica Neue", Arial, sans-serif',
++					domain: '900 "Arial Rounded MT Bold", "Helvetica Neue", Arial, sans-serif',
++					resolvedGlyphFont: 'unmeasured'
++				},
++				renderer: glMetadata
++			},
++			supported,
++			limits,
++			counts: { runs: run, ...dropped },
++			completion: {
++				first: events.some((e) => e.run === 1 && e.kind === 'boot-animation-complete'),
++				return: events.some((e) => e.run === 1 && e.kind === 'return-animation-complete'),
++				replay: events.some((e) => e.run === 2 && e.kind === 'boot-animation-complete')
++			},
++			unobserved: [1, 2].map((id) => ({
++				run: id,
++				markers: expected.filter((k) => !events.some((e) => e.run === id && e.kind === k))
++			})),
++			events,
++			frames,
++			longtasks,
++			errors,
++			navigation: performance.getEntriesByType('navigation').map((e) => ({
++				type: (e as PerformanceNavigationTiming).type,
++				startTime: e.startTime,
++				duration: e.duration,
++				domContentLoaded: (e as PerformanceNavigationTiming).domContentLoadedEventEnd,
++				load: (e as PerformanceNavigationTiming).loadEventEnd,
++				responseEnd: (e as PerformanceNavigationTiming).responseEnd
++			})),
++			resources: performance
++				.getEntriesByType('resource')
++				.slice(0, 200)
++				.map((e) => {
++					const r = e as PerformanceResourceTiming;
++					return {
++						path: new URL(r.name).pathname,
++						startTime: r.startTime,
++						duration: r.duration,
++						transferSize: r.transferSize,
++						encodedBodySize: r.encodedBodySize,
++						initiatorType: r.initiatorType
++					};
++				})
++		};
++	}
++	function download() {
++		mark('download-requested');
++		const data = snapshot(
++			document.querySelector<HTMLInputElement>('#diagnostic-device')?.value || ''
++		);
++		const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
++		const url = URL.createObjectURL(blob),
++			a = document.createElement('a');
++		a.href = url;
++		a.download = 'first-boot-diagnostic-' + bootCanvasMode + '-' + sessionId + '.json';
++		a.click();
++		setTimeout(() => URL.revokeObjectURL(url), 1000);
++	}
++	function mount() {
++		panel = document.createElement('details');
++		panel.id = 'firstboot-diagnostic';
++		panel.open = true;
++		panel.innerHTML =
++			'<summary>FIRST-BOOT DIAGNOSTIC: ' +
++			bootCanvasMode +
++			' | lean-canvas-hint-candidate-20261013</summary><div><ol><li>Wait for START. Press START. Wait for the site.</li><li>Press BACK TO THE ROOM. Wait for START.</li><li>Press START again. Wait for the site.</li><li>Download the diagnostic file.</li></ol><p>Keep this tab open between boots. Data stays in this browser. No automatic upload.</p><label>Device name (optional) <input id="diagnostic-device" maxlength="80"></label><p><button id="diagnostic-download" type="button">Download JSON</button> <button id="diagnostic-restart" type="button">Restart by reload</button></p><p id="diagnostic-status">Waiting for first START.</p><p>Submission timestamps do not prove displayed frames. This preview measures behavior. It does not improve stutter.</p><p>Optional Chrome trace: Open DevTools → Performance. Record the same sequence. Stop and save the trace. Android does not need remote debugging for this JSON file.</p></div>';
++		const style = document.createElement('style');
++		style.textContent =
++			'#firstboot-diagnostic{position:fixed;left:8px;top:8px;z-index:2147483646;max-width:min(320px,calc(100vw - 16px));max-height:38vh;overflow:auto;padding:8px;background:#fff;color:#111;border:1px solid #777;border-radius:6px;font:12px/1.4 Arial,sans-serif;box-sizing:border-box}#firstboot-diagnostic summary{cursor:pointer;font-weight:bold}#firstboot-diagnostic ol{padding-left:20px}#firstboot-diagnostic button,#firstboot-diagnostic input{font:inherit;color:#111;background:#fff;border:1px solid #777;border-radius:3px;padding:5px}#firstboot-diagnostic p{margin:8px 0}#firstboot-diagnostic[data-moving],#firstboot-diagnostic[data-focused]{display:none}';
++		document.head.append(style);
++		document.body.append(panel);
++		panel.querySelector('#diagnostic-download')!.addEventListener('click', download);
++		panel.querySelector('#diagnostic-restart')!.addEventListener('click', () => {
++			if (
++				confirm('Restart this diagnostic session by reload? Existing measurements will be lost.')
++			) {
++				sessionStorage.setItem('room-place', 'room');
++				location.reload();
++			}
++		});
++	}
++	if (document.readyState === 'loading')
++		document.addEventListener('DOMContentLoaded', mount, { once: true });
++	else mount();
++	return {
++		mark,
++		once,
++		snapshot,
++		download,
++		bootCanvas(ctx: CanvasRenderingContext2D) {
++			if (typeof ctx.getContextAttributes === 'function') {
++				try {
++					bootCanvasAttributes = ctx.getContextAttributes();
++					bootCanvasAttributesStatus = 'supported';
++				} catch {
++					bootCanvasAttributesStatus = 'failed';
++				}
++			} else bootCanvasAttributesStatus = 'unsupported';
++			mark('boot-canvas-context-created', { mode: bootCanvasMode });
++		},
++		focus(value: boolean) {
++			panel?.toggleAttribute('data-focused', value);
++		},
++		mode(next: string) {
++			if (next === 'booting' && currentMode === 'room') {
++				run++;
++				activation = false;
++			}
++			mark('mode', { from: currentMode, to: next });
++			currentMode = next;
++			if (next === 'site' || next === 'room') lastFrame = null;
++			if (panel) {
++				panel.toggleAttribute('data-moving', next === 'booting' || next === 'returning');
++				if (next === 'booting') panel.open = false;
++				panel.querySelector('#diagnostic-status')!.textContent =
++					next === 'site'
++						? run === 2
++							? 'Replay complete. Download JSON.'
++							: 'First boot complete. Use BACK TO THE ROOM.'
++						: next === 'room'
++							? run === 1
++								? 'Return complete. Press START again.'
++								: 'Wait for START.'
++							: next;
++			}
++		},
++		renderer(gl: WebGLRenderingContext | WebGL2RenderingContext) {
++			const ext = gl.getExtension('WEBGL_debug_renderer_info');
++			glMetadata = {
++				vendor: gl.getParameter(gl.VENDOR),
++				renderer: gl.getParameter(gl.RENDERER),
++				version: gl.getParameter(gl.VERSION),
++				unmaskedRenderer: ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : 'unsupported',
++				drawingBuffer: { width: gl.drawingBufferWidth, height: gl.drawingBufferHeight }
++			};
++		},
++		frameStart(raf: number, boot: number, mode: string): Frame | undefined {
++			if (run < 1 || run > 2 || (mode !== 'booting' && mode !== 'returning')) return;
++			const a = performance.now();
++			const phase =
++				mode === 'returning'
++					? 'return'
++					: !activation
++						? 'camera-before-power'
++						: boot < 0.35
++							? 'activation'
++							: boot < 1.1
++								? 'arrival'
++								: boot < 1.9
++									? 'drop'
++									: boot < 3.5
++										? 'colour-glint'
++										: 'fade';
++			const f = {
++				t: a,
++				raf,
++				boot,
++				mode,
++				run,
++				phase,
++				gapMs: lastFrame === null ? null : a - lastFrame,
++				paintMs: 0,
++				submitMs: 0,
++				totalMs: 0,
++				recorderMs: 0
++			};
++			lastFrame = a;
++			push(frames, f, 3000, 'frames');
++			f.recorderMs = performance.now() - a;
++			return f;
++		},
++		frameEnd(f: Frame | undefined) {
++			if (f) f.totalMs = performance.now() - f.t;
++		}
++	};
++}
++export const diagnostic =
++	typeof window !== 'undefined' && new URLSearchParams(location.search).get('diagnostic') !== 'off'
++		? createDiagnostic()
++		: undefined;
++if (typeof window !== 'undefined') Object.assign(window, { __firstbootDiagnostic: diagnostic });
+diff --git a/src/lib/boot/engine.ts b/src/lib/boot/engine.ts
+index e69e9d9..7c576e8 100644
+--- a/src/lib/boot/engine.ts
++++ b/src/lib/boot/engine.ts
+@@ -1,3 +1,5 @@
++import { diagnostic as diag } from './diagnostic';
++import { bootCanvasOptions } from './context-control';
+ // The room: the bedside table in 3D, the home screen of the site. Click the Game Boy Advance SP and it
+ // lifts off the table, boots, and the camera dives into its screen to hand over to the page; going
+ // back plays the same thing in reverse. While the page is showing, nothing renders.
+@@ -128,10 +130,12 @@ export function startView(aspect: number) {
+ 
+ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 	const { canvas, layer, background, onProgress, onMode, onFocus, onCube, onBonsai } = options;
++	diag?.mark('create-room');
+ 
+ 	const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+ 	renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+ 	renderer.setSize(innerWidth, innerHeight, false);
++	diag?.renderer(renderer.getContext());
+ 	renderer.toneMapping = THREE.ACESFilmicToneMapping;
+ 	renderer.toneMappingExposure = 1.1;
+ 	await breathe();
+@@ -150,8 +154,20 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 	const screenCanvas = document.createElement('canvas');
+ 	screenCanvas.width = 960;
+ 	screenCanvas.height = 640;
+-	const screenCtx = screenCanvas.getContext('2d')!;
++	const screenCtx = (
++		bootCanvasOptions
++			? screenCanvas.getContext('2d', bootCanvasOptions)
++			: screenCanvas.getContext('2d')
++	) as CanvasRenderingContext2D;
++	diag?.bootCanvas(screenCtx);
+ 	const screenTexture = new THREE.CanvasTexture(screenCanvas);
++	screenTexture.onUpdate = () =>
++		diag?.once('screen-texture-upload-submitted', { boot: s.boot, mode });
++	diag?.mark('screen-texture-created', {
++		width: screenCanvas.width,
++		height: screenCanvas.height,
++		context: 'default Canvas2D'
++	});
+ 	screenTexture.colorSpace = THREE.SRGBColorSpace;
+ 	screenTexture.flipY = false;
+ 	const screenMaterial = new THREE.MeshBasicMaterial({ color: '#1d201d', toneMapped: false });
+@@ -253,6 +269,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 		.setDRACOLoader(draco)
+ 		.parseAsync(await files.model.finally(() => clearInterval(progress)), '');
+ 	onProgress(0.75);
++	diag?.mark('model-parsed');
+ 	draco.dispose();
+ 	const growing = growBonsai(gltf.scene, grower);
+ 	// Audio has a native setup cost: give it its own task while the pictures are downloading.
+@@ -838,6 +855,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 	// The other pictures can keep downloading while shaders are submitted.
+ 	await Promise.all([...lightmapsIn, portraitIn]);
+ 	onProgress(0.9);
++	diag?.mark('assets-prepared');
+ 	await breathe();
+ 	for (const group of Object.values(lighting)) {
+ 		renderer.initTexture(group.base);
+@@ -849,10 +867,14 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 	await breathe();
+ 	renderer.initTexture(portraitArt);
+ 	await breathe();
++	diag?.mark('compile-wait-start');
+ 	await Promise.all(compiling);
++	diag?.mark('compile-wait-end');
+ 	await breathe();
+ 	const sound = await sounding;
++	diag?.mark('font-wait-start');
+ 	await document.fonts.ready;
++	diag?.mark('fonts-ready', { status: document.fonts.status });
+ 	// The first draw of each mesh does more than draw (checks its shader, uploads its buffers), so the
+ 	// room is drawn behind the loader two meshes at a time first, into a single pixel. A spare layer
+ 	// picks them out, with the lights, so the shaders are the room's own.
+@@ -895,6 +917,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 	canvas.addEventListener('pointercancel', pointerup);
+ 	// Touches turn the cube rather than scroll or zoom anything.
+ 	canvas.style.touchAction = 'none';
++	diag?.mark('room-ready');
+ 	onProgress(1);
+ 
+ 	// Sends buffers to the GPU ahead of the first frame, with a breath after each. (three.js uploads a
+@@ -1063,6 +1086,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 	}
+ 
+ 	function power(on: boolean) {
++		diag?.mark('screen-material-power', { on, boot: s.boot, mode });
+ 		ledMaterial?.emissive.set(on ? '#3dff6a' : '#000000');
+ 		if (ledMaterial) ledMaterial.emissiveIntensity = on ? 2 : 0;
+ 		screenMaterial.color.set(on ? '#ffffff' : '#1d201d');
+@@ -1311,6 +1335,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 	function render(time: number) {
+ 		if (idleFps < 60 && !busy(time) && time - lastRendered < 1000 / idleFps - 2) return;
+ 		lastRendered = time;
++		const df = diag?.frameStart(time, s.boot, mode);
+ 		const t = time / 1000;
+ 		// (Time since the last frame drawn; the simulations take it in steps of at most 0.05 s.)
+ 		const elapsed = lastFrame ? Math.min(0.25, t - lastFrame) : 0;
+@@ -1370,11 +1395,17 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 				screenCtx.fillRect(0, 0, screenCanvas.width, screenCanvas.height);
+ 				screenCtx.fillStyle = `rgba(0, 0, 0, ${screenFade.value})`;
+ 				screenCtx.fillRect(0, 0, screenCanvas.width, screenCanvas.height);
+-			} else drawBootScreen(screenCtx, s.boot, background);
++			} else {
++				const pt = df ? performance.now() : 0;
++				drawBootScreen(screenCtx, s.boot, background);
++				if (df) df.paintMs = performance.now() - pt;
++			}
+ 			screenTexture.needsUpdate = true;
+ 		}
+ 		rubiks.sync();
++		const st = df ? performance.now() : 0;
+ 		renderer.render(scene, camera);
++		if (df) df.submitMs = performance.now() - st;
+ 		if (outline.thing && outline.opacity > 0.001) {
+ 			const background = scene.background;
+ 			scene.background = null;
+@@ -1408,6 +1439,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 			renderer.render(outlineScene, outlineCamera);
+ 			renderer.autoClear = true;
+ 		}
++		diag?.frameEnd(df);
+ 	}
+ 
+ 	function resize() {
+@@ -2158,6 +2190,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 	}
+ 
+ 	function setMode(next: RoomMode) {
++		diag?.mode(next);
+ 		mode = next;
+ 		updateLoop();
+ 		if (import.meta.env.DEV)
+@@ -2174,7 +2207,10 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 		void sound.resume();
+ 		timeline?.kill();
+ 		timeline = timelineFor();
+-		timeline.eventCallback('onComplete', () => setMode('site'));
++		timeline.eventCallback('onComplete', () => {
++			diag?.mark('boot-animation-complete');
++			setMode('site');
++		});
+ 		setMode('booting');
+ 		timeline.play();
+ 	}
+@@ -2218,7 +2254,12 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 		power(true);
+ 		// The page fades out to the lit screen, the camera pulls out, then the screen switches off.
+ 		screenFade.value = 0;
+-		const tl = gsap.timeline({ onComplete: () => setMode('room') });
++		const tl = gsap.timeline({
++			onComplete: () => {
++				diag?.mark('return-animation-complete');
++				setMode('room');
++			}
++		});
+ 		tl.fromTo(layer, { opacity: 0 }, { opacity: 1, duration: 0.45, ease: 'power1.inOut' }, 0)
+ 			.call(
+ 				() => {

@@ -1,0 +1,2 @@
+import {execFileSync} from 'node:child_process';import {out} from './prepare.mjs';
+for(const [name,variant,mode] of [['pair2-hint','hint','native'],['pair2-original','original','native'],['cpu-original','original','cpu'],['cpu-hint','hint','cpu'],['network-hint','hint','network'],['network-original','original','network']]){execFileSync(process.execPath,[out+'/run.mjs',name,variant,mode],{windowsHide:true,stdio:'inherit',timeout:240000});}

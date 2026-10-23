@@ -1,0 +1,26 @@
+﻿(()=>{
+const o=window.__external={raf:[],phases:[],clicks:[],intros:[],letters:[],uniformNames:[],gates:[],hookIntervals:[],counts:{raf:0,mutation:0,intro:0,click:0,lookup:0,scalar:0,vector:0,paint:0},run:0,drops:0,unhandled:[]};
+const cap=(a,v,n=16000)=>a.length<n?a.push(v):o.drops++,ids=new WeakMap(),locations=new WeakMap(),programs=new WeakMap();let next=0,button=null,intro=true,lookupLive=true,restoreMarker=null,state=null;
+const id=x=>x?(ids.get(x)||((ids.set(x,++next)),next)):0;o.buttonId=id;
+function mark(name,semantic){const m=performance.mark(name);cap(o.phases,{name,t:m.startTime,semantic:semantic??null,run:o.run});return m.startTime;}
+function externalTimingRAF(t){o.counts.raf++;cap(o.raf,t);requestAnimationFrame(externalTimingRAF);}requestAnimationFrame(externalTimingRAF);
+const protos=[WebGLRenderingContext.prototype,WebGL2RenderingContext.prototype],saved=protos.map(p=>({p,lookup:p.getUniformLocation,scalar:p.uniform1f,vector:p.uniform4fv})),paint=CanvasRenderingContext2D.prototype.fillText;
+function restoreLookup(){if(!lookupLive)return;for(const s of saved)s.p.getUniformLocation=s.lookup;lookupLive=false;mark('external-lookup-restored');}
+for(const s of saved)s.p.getUniformLocation=function externalLookup(program,name){o.counts.lookup++;const v=s.lookup.call(this,program,name);if(v&&['powered','returning','colours[0]'].includes(name)){let p=programs.get(program);if(!p){p={};programs.set(program,p);}p[name]=true;locations.set(v,{p,name});cap(o.uniformNames,{name,t:performance.now()});if(p.powered&&p.returning&&p['colours[0]'])restoreLookup();}return v;};
+function installMarker(){const interval={run:o.run,from:performance.now(),end:null,reason:null};cap(o.hookIntervals,interval);state={p:null,powered:null,returning:null,alpha:null};
+restoreMarker=reason=>{for(const s of saved){s.p.uniform1f=s.scalar;s.p.uniform4fv=s.vector;}CanvasRenderingContext2D.prototype.fillText=paint;interval.end=performance.now();interval.reason=reason;restoreMarker=null;mark('external-marker-hooks-restored-'+o.run,interval.end);};
+function finish(kind){const t=performance.now();cap(o.letters,{t,run:o.run,kind,state:{powered:state.powered,returning:state.returning,alpha:state.alpha},verified:kind==='N-paint'||state.powered>0&&state.returning===0});mark('external-first-letter-'+o.run,t);restoreMarker('valid-first-letter');}
+for(const s of saved){s.p.uniform1f=function externalScalar(location,value){o.counts.scalar++;const v=s.scalar.call(this,location,value),l=locations.get(location);if(l&&(l.name==='powered'||l.name==='returning')){if(state.p&&state.p!==l.p){state.powered=state.returning=state.alpha=null;}state.p=l.p;state[l.name]=value;cap(o.gates,{run:o.run,name:l.name,value,t:performance.now()},100);}return v;};s.p.uniform4fv=function externalVector(location,value,...rest){o.counts.vector++;const v=s.vector.call(this,location,value,...rest),l=locations.get(location);if(l?.name==='colours[0]'){state.alpha=value[3];if(state.p===l.p&&state.powered>0&&state.returning===0&&state.alpha>0)finish('atlas-gated-uniform-submission');}return v;};}
+CanvasRenderingContext2D.prototype.fillText=function externalPaint(text,...args){o.counts.paint++;const v=paint.call(this,text,...args);if(this.canvas.width===960&&this.canvas.height===640&&text==='N'&&this.globalAlpha>0)finish('N-paint');return v;};
+}
+function externalIntro(e){if(!e.target.matches?.('[data-start]'))return;o.counts.intro++;const b=id(e.target);if(e.type==='introstart'){const t=mark('external-intro-start-'+(o.run+1));cap(o.intros,{button:b,run:o.run,start:t,end:null});}else{const r=o.intros.find(a=>a.button===b&&a.run===o.run&&a.end===null),t=mark('external-intro-end-'+(o.run+1));if(r)r.end=t;else cap(o.intros,{button:b,run:o.run,start:null,end:t,unmatched:true});restoreLookup();}}
+for(const type of ['introstart','introend'])document.addEventListener(type,externalIntro,true);
+function externalClick(e){o.counts.click++;const b=e.target.closest?.('[data-start]'),text=b?'START':e.target.textContent?.trim().slice(0,70),t=performance.now();cap(o.clicks,{t,trusted:e.isTrusted,text,button:b?id(b):null,x:e.clientX,y:e.clientY});if(b&&e.isTrusted){o.run++;mark('external-START-'+o.run,t);installMarker();}}
+document.addEventListener('click',externalClick,true);
+function externalMutation(){o.counts.mutation++;const e=document.querySelector('[data-start]');if(e&&e!==button)mark('external-start-DOM');button=e;const i=document.documentElement.dataset.intro==='play';if(!i&&intro){mark('external-site');if(restoreMarker){cap(o.gates,{run:o.run,invalid:true,reason:'No verified powered/non-returning first-letter submission',state:{powered:state.powered,returning:state.returning,alpha:state.alpha}});restoreMarker('invalid-at-site');}}intro=i;}
+new MutationObserver(externalMutation).observe(document,{subtree:true,childList:true,attributes:true,attributeFilter:['data-intro']});
+addEventListener('unhandledrejection',e=>cap(o.unhandled,String(e.reason),100));
+try{localStorage.setItem('boot-seen','1');sessionStorage.setItem('room-place','room');}catch{}
+})();
+//# sourceURL=external-minimal-observer.js
+

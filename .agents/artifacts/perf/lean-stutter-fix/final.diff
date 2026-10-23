@@ -1,0 +1,534 @@
+diff --git a/src/lib/boot/BootIntro.svelte b/src/lib/boot/BootIntro.svelte
+index ae48bda..2e320ad 100644
+--- a/src/lib/boot/BootIntro.svelte
++++ b/src/lib/boot/BootIntro.svelte
+@@ -5,14 +5,22 @@
+ 	import { fetchRoom } from './fetches';
+ 	import { room } from './room.svelte';
+ 
++	function popFrame(t: number) {
++		const spring = 1 - Math.pow(1 - t, 3) + Math.sin(t * Math.PI) * 0.12;
++		return {
++			opacity: Math.min(1, t * 2),
++			transform: `scale(${0.6 + 0.4 * spring}) rotate(${(1 - t) * -4}deg)`
++		};
++	}
++
+ 	// Panels pop in like a game dialog: from small and tilted, overshooting a touch.
+ 	function pop(_node: Element, { delay = 0, duration = 520 } = {}) {
+ 		return {
+ 			delay,
+ 			duration,
+ 			css: (t: number) => {
+-				const spring = 1 - Math.pow(1 - t, 3) + Math.sin(t * Math.PI) * 0.12;
+-				return `opacity: ${Math.min(1, t * 2)}; transform: scale(${0.6 + 0.4 * spring}) rotate(${(1 - t) * -4}deg);`;
++				const frame = popFrame(t);
++				return `opacity: ${frame.opacity}; transform: ${frame.transform};`;
+ 			}
+ 		};
+ 	}
+@@ -50,6 +58,77 @@
+ 	let progress = $state(0);
+ 	let pressed = $state(false);
+ 	let focused = $state<Thing | null>(null);
++	let lanternPrepared = $state(false);
++	let radioPrepared = $state(false);
++	let lanternPanel = $state<HTMLElement>();
++	let radioPanel = $state<HTMLElement>();
++	let preparingPanels = false;
++	let disposed = false;
++
++	// Prepare one panel per yielded task. The room does not wait for these tasks.
++	// A selection that arrives first mounts the same panel through the normal path.
++	async function preparePanels() {
++		if (preparingPanels) return;
++		preparingPanels = true;
++		const scheduler = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler;
++		const breathe = () =>
++			scheduler?.yield ? scheduler.yield() : new Promise((resolve) => setTimeout(resolve, 0));
++		await breathe();
++		if (disposed) return;
++		lanternPrepared = true;
++		await tick();
++		lanternPanel?.getBoundingClientRect();
++		await breathe();
++		if (disposed) return;
++		radioPrepared = true;
++		await tick();
++		radioPanel?.getBoundingClientRect();
++	}
++
++	// Persistent panels replay the same pop keyframes and child entries on every selection.
++	function preparedPanel(node: HTMLElement, selected: boolean) {
++		let animation: Animation | undefined;
++		let from = 0;
++		let to = 0;
++		let active = false;
++		node.style.visibility = 'hidden';
++		node.dataset.panelHidden = '';
++		function update(selected: boolean) {
++			if (selected === active) return;
++			active = selected;
++			const replaying = active && node.style.visibility === 'visible';
++			const progress = Number(animation?.effect?.getComputedTiming().progress ?? 0);
++			from = animation ? from + (to - from) * progress : active ? 0 : 1;
++			animation?.cancel();
++			if (replaying)
++				for (const child of node.getAnimations({ subtree: true })) {
++					if (child instanceof CSSAnimation) child.currentTime = 0;
++				}
++			to = active ? 1 : 0;
++			if (active) {
++				node.style.visibility = 'visible';
++				delete node.dataset.panelHidden;
++			}
++			const duration = active ? 520 : 220;
++			const steps = Math.max(1, Math.ceil(duration / (1000 / 60)));
++			const frames = Array.from({ length: steps + 1 }, (_, i) =>
++				popFrame(from + ((to - from) * i) / steps)
++			);
++			const next = node.animate(frames, { delay: active ? 350 : 0, duration, fill: 'both' });
++			animation = next;
++			next.onfinish = () => {
++				if (animation !== next) return;
++				if (!active) {
++					node.style.visibility = 'hidden';
++					node.dataset.panelHidden = '';
++				}
++				next.cancel();
++				animation = undefined;
++			};
++		}
++		update(selected);
++		return { update, destroy: () => animation?.cancel() };
++	}
+ 
+ 	// The lantern's presets: warm whites to colours. Brightness runs from off to a little over full.
+ 	const LANTERN_COLORS = [
+@@ -90,9 +169,18 @@
+ 	// so it's told how much that is whenever the panel opens or changes size.
+ 	$effect(() => {
+ 		if (!focused) return;
++		const thing = focused;
++		let alive = true;
++		const selectedPanel = () =>
++			thing === 'lantern'
++				? lanternPanel
++				: thing === 'clock'
++					? radioPanel
++					: layer?.querySelector<HTMLElement>('.panel:not([inert])');
+ 		let observer: ResizeObserver | undefined;
+ 		const report = () => {
+-			const panel = layer?.querySelector<HTMLElement>('.panel');
++			if (!alive || focused !== thing) return;
++			const panel = selectedPanel();
+ 			if (!panel) return;
+ 			const box = panel.getBoundingClientRect();
+ 			if (innerWidth <= 640 || innerWidth <= innerHeight)
+@@ -100,7 +188,8 @@
+ 			else engine?.setFree('left', box.left / innerWidth);
+ 		};
+ 		void tick().then(() => {
+-			const panel = layer?.querySelector<HTMLElement>('.panel');
++			if (!alive || focused !== thing) return;
++			const panel = selectedPanel();
+ 			if (!panel) return;
+ 			report();
+ 			observer = new ResizeObserver(report);
+@@ -108,6 +197,7 @@
+ 		});
+ 		addEventListener('resize', report);
+ 		return () => {
++			alive = false;
+ 			observer?.disconnect();
+ 			removeEventListener('resize', report);
+ 		};
+@@ -198,7 +288,7 @@
+ 	async function load(startIn: 'room' | 'site') {
+ 		fetchRoom();
+ 		const { createRoom } = await import('./engine');
+-		engine = await createRoom({
++		const loading = createRoom({
+ 			canvas: canvas!,
+ 			layer: layer!,
+ 			background,
+@@ -221,11 +311,15 @@
+ 				}
+ 				if (focused === 'clock' && thing !== 'clock' && radio.on && !player.station())
+ 					player.setOn(false);
++				if (thing === 'lantern') lanternPrepared = true;
++				if (thing === 'clock') radioPrepared = true;
+ 				focused = thing;
+ 			},
+ 			onCube: (state) => (cube = state),
+ 			onBonsai: (state) => (bonsai = state)
+ 		});
++		void preparePanels();
++		engine = await loading;
+ 		engine.setLantern(lanternColor, lanternLevel);
+ 		engine.setRadio({ on: radio.on, freq: radio.freq });
+ 		if (skipped) engine.skipToSite();
+@@ -338,6 +432,7 @@
+ 			}
+ 		}
+ 		return () => {
++			disposed = true;
+ 			engine?.dispose();
+ 			room.ready = false;
+ 		};
+@@ -379,8 +474,16 @@
+ 		</div>
+ 	{/if}
+ 
+-	{#if focused === 'lantern'}
+-		<aside class="panel" aria-label="Lantern" in:pop={{ delay: 350 }} out:pop={{ duration: 220 }}>
++	{#if lanternPrepared || focused === 'lantern'}
++		<aside
++			class="panel"
++			aria-label="Lantern"
++			bind:this={lanternPanel}
++			data-panel-hidden
++			inert={focused !== 'lantern'}
++			aria-hidden={focused !== 'lantern'}
++			use:preparedPanel={focused === 'lantern'}
++		>
+ 			<p class="ribbon">LANTERN</p>
+ 			<h2>Pick a light</h2>
+ 			<div class="swatches" role="radiogroup" aria-label="Colour">
+@@ -473,12 +576,15 @@
+ 		</aside>
+ 	{/if}
+ 
+-	{#if focused === 'clock'}
++	{#if radioPrepared || focused === 'clock'}
+ 		<aside
+ 			class="panel radio-panel"
+ 			aria-label="Clock radio"
+-			in:pop={{ delay: 350 }}
+-			out:pop={{ duration: 220 }}
++			bind:this={radioPanel}
++			data-panel-hidden
++			inert={focused !== 'clock'}
++			aria-hidden={focused !== 'clock'}
++			use:preparedPanel={focused === 'clock'}
+ 		>
+ 			<p class="ribbon radio-ribbon">RADIO</p>
+ 			<div class="station" data-status={radio.status}>
+@@ -662,6 +768,15 @@
+ </div>
+ 
+ <style>
++	.panel[data-panel-hidden] .swatches button,
++	.panel[data-panel-hidden] .gem,
++	.panel[data-panel-hidden] .presets button,
++	.panel[data-panel-hidden] .swatches button::after,
++	.panel[data-panel-hidden] .station .status,
++	.panel[data-panel-hidden] .freq.on {
++		animation: none;
++	}
++
+ 	.room-layer {
+ 		display: none;
+ 		position: fixed;
+diff --git a/src/lib/boot/boot-screen.ts b/src/lib/boot/boot-screen.ts
+index ddc3851..6240605 100644
+--- a/src/lib/boot/boot-screen.ts
++++ b/src/lib/boot/boot-screen.ts
+@@ -26,15 +26,110 @@ const LINE_SIZE = 0.11;
+ const LINE_MAX_WIDTH = 0.6;
+ const LINE_CENTRE_Y = 0.74;
+ 
+-export function drawBootScreen(ctx: CanvasRenderingContext2D, t: number, endColor: string) {
++type Letter = { image: HTMLCanvasElement; x: number; y: number; width: number };
++type Prepared = {
++	size: number;
++	letters: string[];
++	slots: number[];
++	glyphs: Map<string, Letter>;
++	line: Letter;
++	lineSize: number;
++	scratch: CanvasRenderingContext2D;
++};
++
++// Rasterize at the largest arrival scale. The animation keeps its original text metrics and
++// origins, including the italic overhang, rather than treating each letter as an equal-size tile.
++export async function prepareBootScreen(
++	ctx: CanvasRenderingContext2D,
++	breathe: () => Promise<unknown>
++) {
++	const { width: w, height: h } = ctx.canvas;
++	ctx.textBaseline = 'middle';
++	ctx.textAlign = 'left';
++	let size = h * WORD_SIZE;
++	ctx.font = wordFont(size);
++	size *= Math.min(1, (w * WORD_MAX_WIDTH) / ctx.measureText(WORDMARK).width);
++	ctx.font = wordFont(size);
++	const letters = [...WORDMARK];
++	const slots: number[] = [];
++	let x = -ctx.measureText(WORDMARK).width / 2;
++	for (const letter of letters) {
++		const width = ctx.measureText(letter).width;
++		slots.push(x + width / 2);
++		x += width;
++	}
++	const glyphs = new Map<string, Letter>();
++	for (const letter of new Set(letters.filter((letter) => letter !== ' '))) {
++		glyphs.set(letter, paint(letter, wordFont(size), '#fff', 5));
++		await breathe();
++	}
++	let lineSize = h * LINE_SIZE;
++	ctx.font = lineFont(lineSize);
++	lineSize *= Math.min(1, (w * LINE_MAX_WIDTH) / ctx.measureText(LINE).width);
++	ctx.font = lineFont(lineSize);
++	const line = paint(
++		LINE,
++		lineFont(lineSize),
++		rgb(MAGENTA),
++		1,
++		(w - ctx.measureText(LINE).width) / 2,
++		h * LINE_CENTRE_Y
++	);
++	const scratchCanvas = document.createElement('canvas');
++	scratchCanvas.width = Math.max(...[...glyphs.values()].map((g) => g.image.width));
++	scratchCanvas.height = Math.max(...[...glyphs.values()].map((g) => g.image.height));
++	const scratch = scratchCanvas.getContext('2d')!;
++	const prepared = { size, letters, slots, glyphs, line, lineSize, scratch };
++	return {
++		draw: (t: number, endColor: string) => drawBootScreen(ctx, t, endColor, prepared),
++		dispose() {
++			for (const { image } of [...glyphs.values(), line]) image.width = image.height = 0;
++			scratchCanvas.width = scratchCanvas.height = 0;
++			glyphs.clear();
++		}
++	};
++
++	function paint(
++		text: string,
++		font: string,
++		colour: string,
++		scale: number,
++		originX = 0,
++		originY = 0
++	): Letter {
++		ctx.font = font;
++		const metrics = ctx.measureText(text);
++		// Hinting at the raster size can extend beyond the unscaled metrics by part of a pixel.
++		const padding = Math.ceil(scale) + 2;
++		const x = Math.floor((originX - metrics.actualBoundingBoxLeft) * scale) - padding;
++		const y = Math.floor((originY - metrics.actualBoundingBoxAscent) * scale) - padding;
++		const image = document.createElement('canvas');
++		image.width = Math.ceil((originX + metrics.actualBoundingBoxRight) * scale) + padding - x;
++		image.height = Math.ceil((originY + metrics.actualBoundingBoxDescent) * scale) + padding - y;
++		const pen = image.getContext('2d')!;
++		pen.scale(scale, scale);
++		pen.font = font;
++		pen.textBaseline = 'middle';
++		pen.fillStyle = colour;
++		pen.fillText(text, originX - x / scale, originY - y / scale);
++		return { image, x: x / scale - originX, y: y / scale - originY, width: metrics.width };
++	}
++}
++
++export function drawBootScreen(
++	ctx: CanvasRenderingContext2D,
++	t: number,
++	endColor: string,
++	prepared?: Prepared
++) {
+ 	const { width: w, height: h } = ctx.canvas;
+ 	ctx.fillStyle = PAPER;
+ 	ctx.fillRect(0, 0, w, h);
+ 	ctx.textBaseline = 'middle';
+ 	ctx.textAlign = 'left';
+ 
+-	drawLine(ctx, t, w, h);
+-	drawWordmark(ctx, t, w, h);
++	drawLine(ctx, t, w, h, prepared);
++	drawWordmark(ctx, t, w, h, prepared);
+ 
+ 	const fade = clamp((t - 3.5) / 0.45);
+ 	if (fade > 0) {
+@@ -45,20 +140,27 @@ export function drawBootScreen(ctx: CanvasRenderingContext2D, t: number, endColo
+ 	}
+ }
+ 
+-function drawWordmark(ctx: CanvasRenderingContext2D, t: number, w: number, h: number) {
++function drawWordmark(
++	ctx: CanvasRenderingContext2D,
++	t: number,
++	w: number,
++	h: number,
++	prepared?: Prepared
++) {
+ 	// Fit the word to its final width, then lay out each letter's slot.
+-	let size = h * WORD_SIZE;
++	let size = prepared?.size ?? h * WORD_SIZE;
+ 	ctx.font = wordFont(size);
+-	size *= Math.min(1, (w * WORD_MAX_WIDTH) / ctx.measureText(WORDMARK).width);
++	if (!prepared) size *= Math.min(1, (w * WORD_MAX_WIDTH) / ctx.measureText(WORDMARK).width);
+ 	ctx.font = wordFont(size);
+-	const letters = [...WORDMARK];
+-	const total = ctx.measureText(WORDMARK).width;
+-	const slots: number[] = [];
+-	let x = -total / 2;
+-	for (const letter of letters) {
+-		const lw = ctx.measureText(letter).width;
+-		slots.push(x + lw / 2);
+-		x += lw;
++	const letters = prepared?.letters ?? [...WORDMARK];
++	const slots = prepared?.slots ?? [];
++	if (!prepared) {
++		let x = -ctx.measureText(WORDMARK).width / 2;
++		for (const letter of letters) {
++			const lw = ctx.measureText(letter).width;
++			slots.push(x + lw / 2);
++			x += lw;
++		}
+ 	}
+ 
+ 	// The assembled word first sits high and a little larger, then drops into place.
+@@ -90,25 +192,58 @@ function drawWordmark(ctx: CanvasRenderingContext2D, t: number, w: number, h: nu
+ 		ctx.globalAlpha = clamp(p * 6);
+ 		ctx.translate(lx, ly);
+ 		ctx.scale(scale, scale);
+-		ctx.fillStyle = letterColour(t, seed, slotX / w);
+-		ctx.fillText(letter, -ctx.measureText(letter).width / 2, 0);
++		const colour = letterColour(t, seed, slotX / w);
++		if (prepared) {
++			ctx.imageSmoothingQuality = 'high';
++			const glyph = prepared.glyphs.get(letter)!;
++			const pen = prepared.scratch;
++			pen.clearRect(0, 0, pen.canvas.width, pen.canvas.height);
++			pen.drawImage(glyph.image, 0, 0);
++			pen.globalCompositeOperation = 'source-in';
++			pen.fillStyle = colour;
++			pen.fillRect(0, 0, glyph.image.width, glyph.image.height);
++			pen.globalCompositeOperation = 'source-over';
++			ctx.drawImage(
++				pen.canvas,
++				0,
++				0,
++				glyph.image.width,
++				glyph.image.height,
++				glyph.x - glyph.width / 2,
++				glyph.y,
++				glyph.image.width / 5,
++				glyph.image.height / 5
++			);
++		} else {
++			ctx.fillStyle = colour;
++			ctx.fillText(letter, -ctx.measureText(letter).width / 2, 0);
++		}
+ 		ctx.restore();
+ 	}
+ }
+ 
+-function drawLine(ctx: CanvasRenderingContext2D, t: number, w: number, h: number) {
++function drawLine(
++	ctx: CanvasRenderingContext2D,
++	t: number,
++	w: number,
++	h: number,
++	prepared?: Prepared
++) {
+ 	const appear = clamp(t / 0.25);
+ 	if (appear <= 0) return;
+-	let size = h * LINE_SIZE;
++	let size = prepared?.lineSize ?? h * LINE_SIZE;
+ 	ctx.font = lineFont(size);
+-	size *= Math.min(1, (w * LINE_MAX_WIDTH) / ctx.measureText(LINE).width);
++	if (!prepared) size *= Math.min(1, (w * LINE_MAX_WIDTH) / ctx.measureText(LINE).width);
+ 	ctx.font = lineFont(size);
+-	const lw = ctx.measureText(LINE).width;
++	const lw = prepared?.line.width ?? ctx.measureText(LINE).width;
+ 	const x = (w - lw) / 2;
+ 	const y = h * LINE_CENTRE_Y;
+ 	ctx.globalAlpha = appear;
+ 	ctx.fillStyle = rgb(MAGENTA);
+-	ctx.fillText(LINE, x, y);
++	if (prepared) {
++		const line = prepared.line;
++		ctx.drawImage(line.image, x + line.x, y + line.y);
++	} else ctx.fillText(LINE, x, y);
+ 	ctx.globalAlpha = 1;
+ 
+ 	// A glint runs across the line just before the ding, briefly washing the letters out.
+diff --git a/src/lib/boot/engine.ts b/src/lib/boot/engine.ts
+index e69e9d9..52f0ce9 100644
+--- a/src/lib/boot/engine.ts
++++ b/src/lib/boot/engine.ts
+@@ -12,7 +12,7 @@ import { lightmapScales } from './assets';
+ import { bakedLighting, bakedMaterial, fillLightmap, type BakedLighting } from './baked-material';
+ import { fetchRoom } from './fetches';
+ import { createBonsai, growBonsai, swayTime } from './bonsai';
+-import { BOOT_DURATION, drawBootScreen } from './boot-screen';
++import { BOOT_DURATION, prepareBootScreen } from './boot-screen';
+ import { drawClockLED, drawFrequencyLED } from './clock-led';
+ import { FM_MIN } from '#lib/radio/stations.js';
+ import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
+@@ -853,6 +853,8 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 	await breathe();
+ 	const sound = await sounding;
+ 	await document.fonts.ready;
++	const bootScreen = await prepareBootScreen(screenCtx, breathe);
++	await breathe();
+ 	// The first draw of each mesh does more than draw (checks its shader, uploads its buffers), so the
+ 	// room is drawn behind the loader two meshes at a time first, into a single pixel. A spare layer
+ 	// picks them out, with the lights, so the shaders are the room's own.
+@@ -1234,11 +1236,29 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 	let freeAbove = 0.52;
+ 	// And on wider screens, how much is left of it.
+ 	let freeLeft = 0.58;
++	const fittedProjection = new THREE.Matrix4();
++	let fittedWidth = 0;
++	let fittedHeight = 0;
++	function rememberFit() {
++		fittedProjection.copy(camera.projectionMatrix);
++		fittedWidth = innerWidth;
++		fittedHeight = innerHeight;
++	}
+ 	function setFree(side: 'above' | 'left', fraction: number) {
+-		if (side === 'above') freeAbove = THREE.MathUtils.clamp(fraction, 0.3, 0.9);
+-		else freeLeft = THREE.MathUtils.clamp(fraction, 0.4, 0.9);
++		const next = THREE.MathUtils.clamp(fraction, side === 'above' ? 0.3 : 0.4, 0.9);
++		const unchanged = next === (side === 'above' ? freeAbove : freeLeft);
++		if (side === 'above') freeAbove = next;
++		else freeLeft = next;
++		if (
++			unchanged &&
++			fittedProjection.equals(camera.projectionMatrix) &&
++			fittedWidth === innerWidth &&
++			fittedHeight === innerHeight
++		)
++			return;
+ 		if (!focused) return;
+ 		const v = viewOf(focused);
++		rememberFit();
+ 		gsap.to(focusView.eye, {
+ 			x: v.eye.x,
+ 			y: v.eye.y,
+@@ -1266,6 +1286,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 			emitCube();
+ 		}
+ 		const v = viewOf(thing);
++		rememberFit();
+ 		focusView.eye.copy(v.eye);
+ 		focusView.target.copy(v.target);
+ 		gsap.killTweensOf(focusBlend);
+@@ -1370,7 +1391,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 				screenCtx.fillRect(0, 0, screenCanvas.width, screenCanvas.height);
+ 				screenCtx.fillStyle = `rgba(0, 0, 0, ${screenFade.value})`;
+ 				screenCtx.fillRect(0, 0, screenCanvas.width, screenCanvas.height);
+-			} else drawBootScreen(screenCtx, s.boot, background);
++			} else bootScreen.draw(s.boot, background);
+ 			screenTexture.needsUpdate = true;
+ 		}
+ 		rubiks.sync();
+@@ -2273,6 +2294,7 @@ export async function createRoom(options: RoomOptions): Promise<Room> {
+ 		trail.remove();
+ 		for (const picker of pickers) picker.geometry.dispose();
+ 		screenTexture.dispose();
++		bootScreen.dispose();
+ 		clockTexture.dispose();
+ 		renderer.dispose();
+ 		renderer.forceContextLoss();
